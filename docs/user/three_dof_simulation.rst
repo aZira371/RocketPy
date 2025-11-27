@@ -427,20 +427,220 @@ relative wind. This affects the lateral motion and impact point:
      - Very fast
      - Rockets with large fins
 
-Example Comparison Notebook
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3-DOF vs 6-DOF Comparison Results
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For a comprehensive comparison of 3-DOF vs 6-DOF simulations with different
-weathercocking coefficients, see the example notebook:
+The following example compares a 6-DOF simulation using the full Bella Lui rocket
+with 3-DOF simulations using ``PointMassRocket`` and different weathercocking
+coefficients. This demonstrates the trade-off between computational speed and
+accuracy.
 
-:doc:`../examples/bella_lui_3dof_vs_6dof_comparison`
+**Setup the simulations:**
 
-This notebook demonstrates:
+.. jupyter-execute::
 
-- **Performance comparison**: 3-DOF is 5-7x faster than 6-DOF
-- **Accuracy analysis**: Apogee predictions within 1.5% of 6-DOF
-- **Weathercocking effects**: How different coefficients affect trajectory
-- **Impact point predictions**: Comparison of landing locations
+    import numpy as np
+    import time
+    from rocketpy import Environment, Flight, Rocket, SolidMotor
+    from rocketpy.rocket.point_mass_rocket import PointMassRocket
+    from rocketpy.motors.point_mass_motor import PointMassMotor
+
+    # Environment
+    env = Environment(
+        gravity=9.81,
+        latitude=47.213476,
+        longitude=9.003336,
+        elevation=407,
+    )
+    env.set_atmospheric_model(type="StandardAtmosphere")
+    env.max_expected_height = 2000
+
+    # Full 6-DOF Motor
+    motor_6dof = SolidMotor(
+        thrust_source="../data/motors/aerotech/AeroTech_K828FJ.eng",
+        burn_time=2.43,
+        dry_mass=1,
+        dry_inertia=(0, 0, 0),
+        center_of_dry_mass_position=0,
+        grains_center_of_mass_position=-1,
+        grain_number=3,
+        grain_separation=0.003,
+        grain_density=782.4,
+        grain_outer_radius=0.042799,
+        grain_initial_inner_radius=0.033147,
+        grain_initial_height=0.1524,
+        nozzle_radius=0.04445,
+        throat_radius=0.0214376,
+        nozzle_position=-1.1356,
+    )
+
+    # Full 6-DOF Rocket
+    rocket_6dof = Rocket(
+        radius=0.078,
+        mass=17.227,
+        inertia=(0.78267, 0.78267, 0.064244),
+        power_off_drag=0.43,
+        power_on_drag=0.43,
+        center_of_mass_without_motor=0,
+    )
+    rocket_6dof.set_rail_buttons(0.1, -0.5)
+    rocket_6dof.add_motor(motor_6dof, -1.1356)
+    rocket_6dof.add_nose(length=0.242, kind="tangent", position=1.542)
+    rocket_6dof.add_trapezoidal_fins(3, span=0.200, root_chord=0.280, tip_chord=0.125, position=-0.75)
+
+    # Point Mass Motor for 3-DOF
+    motor_3dof = PointMassMotor(
+        thrust_source="../data/motors/aerotech/AeroTech_K828FJ.eng",
+        dry_mass=1.0,
+        propellant_initial_mass=1.373,
+    )
+
+    # Point Mass Rocket for 3-DOF
+    rocket_3dof = PointMassRocket(
+        radius=0.078,
+        mass=17.227,
+        center_of_mass_without_motor=0,
+        power_off_drag=0.43,
+        power_on_drag=0.43,
+    )
+    rocket_3dof.add_motor(motor_3dof, -1.1356)
+
+**Run simulations and compare results:**
+
+.. jupyter-execute::
+
+    # 6-DOF Flight
+    start = time.time()
+    flight_6dof = Flight(
+        rocket=rocket_6dof,
+        environment=env,
+        rail_length=4.2,
+        inclination=89,
+        heading=45,
+        terminate_on_apogee=True,
+    )
+    time_6dof = time.time() - start
+
+    # 3-DOF with no weathercocking
+    start = time.time()
+    flight_3dof_0 = Flight(
+        rocket=rocket_3dof,
+        environment=env,
+        rail_length=4.2,
+        inclination=89,
+        heading=45,
+        terminate_on_apogee=True,
+        simulation_mode="3 DOF",
+        weathercock_coeff=0.0,
+    )
+    time_3dof_0 = time.time() - start
+
+    # 3-DOF with default weathercocking
+    start = time.time()
+    flight_3dof_1 = Flight(
+        rocket=rocket_3dof,
+        environment=env,
+        rail_length=4.2,
+        inclination=89,
+        heading=45,
+        terminate_on_apogee=True,
+        simulation_mode="3 DOF",
+        weathercock_coeff=1.0,
+    )
+    time_3dof_1 = time.time() - start
+
+    # 3-DOF with high weathercocking
+    start = time.time()
+    flight_3dof_5 = Flight(
+        rocket=rocket_3dof,
+        environment=env,
+        rail_length=4.2,
+        inclination=89,
+        heading=45,
+        terminate_on_apogee=True,
+        simulation_mode="3 DOF",
+        weathercock_coeff=5.0,
+    )
+    time_3dof_5 = time.time() - start
+
+    # Print comparison table
+    print("=" * 80)
+    print("SIMULATION RESULTS COMPARISON")
+    print("=" * 80)
+    print("\n{:<30} {:>12} {:>12} {:>12} {:>12}".format(
+        "Parameter", "6-DOF", "3DOF(wc=0)", "3DOF(wc=1)", "3DOF(wc=5)"
+    ))
+    print("-" * 80)
+    print("{:<30} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+        "Apogee (m AGL)",
+        flight_6dof.apogee - env.elevation,
+        flight_3dof_0.apogee - env.elevation,
+        flight_3dof_1.apogee - env.elevation,
+        flight_3dof_5.apogee - env.elevation,
+    ))
+    print("{:<30} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+        "Apogee Time (s)",
+        flight_6dof.apogee_time,
+        flight_3dof_0.apogee_time,
+        flight_3dof_1.apogee_time,
+        flight_3dof_5.apogee_time,
+    ))
+    print("{:<30} {:>12.2f} {:>12.2f} {:>12.2f} {:>12.2f}".format(
+        "Max Speed (m/s)",
+        flight_6dof.max_speed,
+        flight_3dof_0.max_speed,
+        flight_3dof_1.max_speed,
+        flight_3dof_5.max_speed,
+    ))
+    print("{:<30} {:>12.3f} {:>12.3f} {:>12.3f} {:>12.3f}".format(
+        "Runtime (s)",
+        time_6dof,
+        time_3dof_0,
+        time_3dof_1,
+        time_3dof_5,
+    ))
+    print("-" * 80)
+    print("Speedup vs 6-DOF:             {:>12} {:>12.1f}x {:>12.1f}x {:>12.1f}x".format(
+        "-",
+        time_6dof / time_3dof_0 if time_3dof_0 > 0 else 0,
+        time_6dof / time_3dof_1 if time_3dof_1 > 0 else 0,
+        time_6dof / time_3dof_5 if time_3dof_5 > 0 else 0,
+    ))
+
+**3D Trajectory Comparison:**
+
+.. jupyter-execute::
+
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection="3d")
+
+    # Plot all trajectories
+    ax.plot(flight_6dof.x[:, 1], flight_6dof.y[:, 1], flight_6dof.z[:, 1] - env.elevation,
+            "b-", linewidth=2, label="6-DOF")
+    ax.plot(flight_3dof_0.x[:, 1], flight_3dof_0.y[:, 1], flight_3dof_0.z[:, 1] - env.elevation,
+            "r--", linewidth=2, label="3-DOF (wc=0)")
+    ax.plot(flight_3dof_1.x[:, 1], flight_3dof_1.y[:, 1], flight_3dof_1.z[:, 1] - env.elevation,
+            "g--", linewidth=2, label="3-DOF (wc=1)")
+    ax.plot(flight_3dof_5.x[:, 1], flight_3dof_5.y[:, 1], flight_3dof_5.z[:, 1] - env.elevation,
+            "m--", linewidth=2, label="3-DOF (wc=5)")
+
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_zlabel("Altitude AGL (m)")
+    ax.set_title("3-DOF vs 6-DOF Trajectory Comparison with Weathercocking")
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+The results show that:
+
+- **3-DOF is 5-7x faster** than 6-DOF simulations
+- **Apogee prediction** is within 1-3% of 6-DOF
+- **Weathercocking** improves trajectory accuracy by aligning the rocket with relative wind
+- **Higher weathercock_coeff** values result in trajectories closer to 6-DOF
 
 Comparison: 3-DOF vs 6-DOF
 ---------------------------
