@@ -261,7 +261,8 @@ def test_weathercock_aligned_no_evolution(example_plain_env, point_mass_rocket):
         weathercock_coeff=1.0,
     )
     # Body pointing in -x direction (into the wind for vx=50)
-    # Quaternion for 90 degree rotation about y-axis: e0=cos(45°), e2=sin(45°)
+    # Quaternion for 90 degree rotation about y-axis uses half-angle:
+    # e0=cos(90°/2)=cos(45°), e2=sin(90°/2)=sin(45°)
     sqrt2_2 = np.sqrt(2) / 2
     # [x, y, z, vx, vy, vz, e0, e1, e2, e3, w1, w2, w3]
     u = [0, 0, 100, 50, 0, 0, sqrt2_2, 0, sqrt2_2, 0, 0, 0, 0]

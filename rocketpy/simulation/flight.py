@@ -1922,6 +1922,7 @@ class Flight:
 
             # Desired direction: opposite of freestream velocity (into the wind)
             # This is the direction the rocket nose should point
+            # Division by free_stream_speed ensures the result is a unit vector
             desired_direction = -free_stream_velocity / free_stream_speed
 
             # Compute rotation axis (cross product of current and desired)
@@ -1932,15 +1933,15 @@ class Flight:
                 # Normalize rotation axis
                 rotation_axis = rotation_axis / rotation_axis_mag
 
-                # Angle between current and desired (sin of angle)
-                # sin_angle = rotation_axis_mag (since both vectors are unit)
+                # The magnitude of the cross product of two unit vectors equals
+                # the sine of the angle between them
                 sin_angle = rotation_axis_mag
 
                 # Clamp sin_angle to valid range
                 sin_angle = min(1.0, max(-1.0, sin_angle))
 
                 # Angular velocity magnitude proportional to misalignment angle
-                # omega = weathercock_coeff * sin(angle) for quasi-static alignment
+                # Using sin(angle) as approximation for small angles: sin(theta) ≈ theta
                 omega_mag = self.weathercock_coeff * sin_angle
 
                 # Angular velocity in inertial frame
