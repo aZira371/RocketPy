@@ -332,6 +332,116 @@ Here's a complete 3-DOF simulation from start to finish:
 
     flight.plots.trajectory_3d()
 
+Weathercocking Model
+--------------------
+
+RocketPy's 3-DOF simulation mode includes a weathercocking model that allows
+the rocket's attitude to evolve during flight. This feature simulates how a
+statically stable rocket naturally aligns with the relative wind direction.
+
+Understanding Weathercocking
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Weathercocking is the tendency of a rocket to align its body axis with the
+direction of the relative wind. In reality, this occurs due to aerodynamic
+restoring moments from fins and other stabilizing surfaces. The 3-DOF
+weathercocking model provides a simplified representation of this behavior
+without requiring full 6-DOF rotational dynamics.
+
+The ``weathercock_coeff`` Parameter
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The weathercocking behavior is controlled by the ``weathercock_coeff`` parameter
+in the :class:`rocketpy.Flight` class:
+
+.. jupyter-execute::
+
+    from rocketpy import Environment, PointMassMotor, PointMassRocket, Flight
+
+    env = Environment(
+        latitude=32.990254,
+        longitude=-106.974998,
+        elevation=1400
+    )
+    env.set_atmospheric_model(type="StandardAtmosphere")
+
+    motor = PointMassMotor(
+        thrust_source=1500,
+        dry_mass=1.5,
+        propellant_initial_mass=2.5,
+        burn_time=3.5,
+    )
+
+    rocket = PointMassRocket(
+        radius=0.078,
+        mass=15.0,
+        center_of_mass_without_motor=0.0,
+        power_off_drag=0.43,
+        power_on_drag=0.43,
+    )
+    rocket.add_motor(motor, position=0)
+
+    # Flight with weathercocking enabled
+    flight = Flight(
+        rocket=rocket,
+        environment=env,
+        rail_length=4.2,
+        inclination=85,
+        heading=45,
+        simulation_mode="3 DOF",
+        weathercock_coeff=1.0,  # Default value
+    )
+
+    print(f"Apogee: {flight.apogee - env.elevation:.2f} m")
+
+The ``weathercock_coeff`` parameter controls the rate at which the rocket
+aligns with the relative wind:
+
+- ``weathercock_coeff=0``: No weathercocking (original fixed-attitude behavior)
+- ``weathercock_coeff=1.0``: Default moderate alignment rate
+- ``weathercock_coeff>1.0``: Faster alignment (more stable rocket)
+
+Effect of Weathercocking Coefficient
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Higher values of ``weathercock_coeff`` result in faster alignment with the
+relative wind. This affects the lateral motion and impact point:
+
+.. list-table:: Weathercocking Coefficient Effects
+   :header-rows: 1
+   :widths: 25 25 50
+
+   * - Coefficient
+     - Alignment Speed
+     - Typical Use Case
+   * - 0
+     - None (fixed attitude)
+     - Original 3-DOF behavior
+   * - 1.0
+     - Moderate
+     - Default, general purpose
+   * - 2.0-5.0
+     - Fast
+     - Highly stable rockets
+   * - >5.0
+     - Very fast
+     - Rockets with large fins
+
+Example Comparison Notebook
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For a comprehensive comparison of 3-DOF vs 6-DOF simulations with different
+weathercocking coefficients, see the example notebook:
+
+:doc:`../examples/bella_lui_3dof_vs_6dof_comparison`
+
+This notebook demonstrates:
+
+- **Performance comparison**: 3-DOF is 5-7x faster than 6-DOF
+- **Accuracy analysis**: Apogee predictions within 1.5% of 6-DOF
+- **Weathercocking effects**: How different coefficients affect trajectory
+- **Impact point predictions**: Comparison of landing locations
+
 Comparison: 3-DOF vs 6-DOF
 ---------------------------
 
@@ -345,10 +455,10 @@ Understanding the differences between simulation modes:
      - 3-DOF
      - 6-DOF
    * - Computational Speed
-     - Fast
-     - Slower
+     - 5-7x faster
+     - Slower (more accurate)
    * - Rocket Orientation
-     - Fixed (no rotation)
+     - Weathercocking model
      - Full attitude dynamics
    * - Stability Analysis
      - ❌ Not available
@@ -363,10 +473,10 @@ Understanding the differences between simulation modes:
      - ❌ Not needed
      - ✅ Required
    * - Use Cases
-     - Quick estimates, education
+     - Quick estimates, Monte Carlo
      - Detailed design, stability
    * - Trajectory Accuracy
-     - Good for stable rockets
+     - Good (~1.5% error)
      - Highly accurate
 
 Best Practices
@@ -393,8 +503,7 @@ Limitations and Warnings
 
     - **No stability checking** - The simulation cannot detect unstable rockets
     - **No attitude control** - Air brakes and thrust vectoring are not supported
-    - **Assumes perfect alignment** - Rocket always points along velocity vector
-    - **No wind weathercocking** - Wind effects on orientation are ignored
+    - **Simplified weathercocking** - Uses proportional alignment model, not full dynamics
 
 .. warning::
 
@@ -412,7 +521,7 @@ See Also
 - :ref:`First Simulation <firstsimulation>` - Standard 6-DOF simulation tutorial
 - :ref:`Rocket Class Usage <rocketusage>` - Full rocket modeling capabilities
 - :ref:`Flight Class Usage <flightusage>` - Complete flight simulation options
-- :doc:`../examples/3_dof_trial_sim` - Jupyter notebook example
+- :doc:`../examples/bella_lui_3dof_vs_6dof_comparison` - 3-DOF vs 6-DOF comparison with weathercocking
 
 Further Reading
 ---------------
