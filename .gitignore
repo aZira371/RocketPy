@@ -172,3 +172,17 @@ cython_debug/
 
 # Mac
 .DS_Store
+
+# Monte Carlo output files
+*.inputs.txt
+*.outputs.txt
+*.errors.txt
+monte_carlo_*.kml
+
+# Test artifacts
+test_*.png
+*_trajectory.png
+*_sensitivity_analysis.png
+*_comparison.png
+landing_ellipse*.png
+optimization*.png
