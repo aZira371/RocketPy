@@ -2051,7 +2051,7 @@ class Flight:
             )
         else:
             net_thrust = 0
-        
+
         gravity = self.env.gravity.get_value_opt(z)
         weight_body = Kt @ Vector([0, 0, -total_mass * gravity])
 

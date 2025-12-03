@@ -303,7 +303,7 @@ def test_weathercock_anti_aligned_uses_perp_axis_and_evolves(flight_weathercock_
     )
 
 
-def test_3dof_all_plots_work(flight_3dof):
+def test_3dof_all_plots_work(flight_3dof, tmp_path):
     """Tests that all plot methods work correctly for 3 DOF flights.
 
     This test ensures that the plotting functionality is compatible with
@@ -315,6 +315,8 @@ def test_3dof_all_plots_work(flight_3dof):
     ----------
     flight_3dof : rocketpy.simulation.flight.Flight
         A Flight object configured for 3-DOF simulation.
+    tmp_path : pathlib.Path
+        Pytest fixture providing a temporary directory path.
     """
     import matplotlib
 
@@ -323,7 +325,8 @@ def test_3dof_all_plots_work(flight_3dof):
 
     # Test individual plot methods that previously failed in 3 DOF mode
     try:
-        flight_3dof.plots.energy_data(filename="/tmp/test_3dof_energy.png")
+        energy_plot_path = tmp_path / "test_3dof_energy.png"
+        flight_3dof.plots.energy_data(filename=str(energy_plot_path))
     except Exception as e:
         pytest.fail(f"energy_data plot failed for 3 DOF flight: {e}")
 
