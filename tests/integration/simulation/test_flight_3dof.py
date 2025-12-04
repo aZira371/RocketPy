@@ -301,3 +301,64 @@ def test_weathercock_anti_aligned_uses_perp_axis_and_evolves(flight_weathercock_
     assert e_dot_magnitude > 1e-6, (
         "Quaternion derivatives should be non-zero for anti-aligned"
     )
+
+
+def test_3dof_all_plots_work(flight_3dof, tmp_path):
+    """Tests that all plot methods work correctly for 3 DOF flights.
+
+    This test ensures that the plotting functionality is compatible with
+    3 DOF simulations, which have different internal data structures
+    compared to 6 DOF simulations. Specifically, it verifies that plots
+    requiring net_thrust work correctly.
+
+    Parameters
+    ----------
+    flight_3dof : rocketpy.simulation.flight.Flight
+        A Flight object configured for 3-DOF simulation.
+    tmp_path : pathlib.Path
+        Pytest fixture providing a temporary directory path.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")  # Use non-interactive backend
+    import matplotlib.pyplot as plt
+
+    # Test individual plot methods that previously failed in 3 DOF mode
+    try:
+        energy_plot_path = tmp_path / "test_3dof_energy.png"
+        flight_3dof.plots.energy_data(filename=str(energy_plot_path))
+    except Exception as e:
+        pytest.fail(f"energy_data plot failed for 3 DOF flight: {e}")
+
+    # Test the all() method which calls all plots
+    try:
+        flight_3dof.plots.all()
+    except Exception as e:
+        pytest.fail(f"plots.all() failed for 3 DOF flight: {e}")
+
+    # Close all figures to avoid memory issues
+    plt.close("all")
+
+
+def test_3dof_net_thrust_available(flight_3dof):
+    """Tests that net_thrust property is available in 3 DOF mode.
+
+    The net_thrust property is required for energy plots and should be
+    available in both 3 DOF and 6 DOF modes.
+
+    Parameters
+    ----------
+    flight_3dof : rocketpy.simulation.flight.Flight
+        A Flight object configured for 3-DOF simulation.
+    """
+    # Check that net_thrust can be accessed
+    assert hasattr(flight_3dof, "net_thrust"), "net_thrust attribute not found"
+
+    # Check that it returns a Function object with data
+    net_thrust = flight_3dof.net_thrust
+    assert len(net_thrust) > 0, "net_thrust should have data points"
+
+    # Verify that thrust_power can be computed (uses net_thrust internally)
+    assert hasattr(flight_3dof, "thrust_power"), "thrust_power attribute not found"
+    thrust_power = flight_3dof.thrust_power
+    assert len(thrust_power) > 0, "thrust_power should have data points"
