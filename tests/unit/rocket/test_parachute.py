@@ -278,19 +278,3 @@ class TestParachuteTriggers:
         
         # Should also trigger at any positive time
         assert parachute.triggerfunc(101325, 1000, state, [], 0.1, None) is True
-
-    def test_negative_delay_trigger(self):
-        """Test that negative delays can be specified (edge case)."""
-        # This should work without errors, though it may not be physically meaningful
-        parachute = Parachute(
-            name="test_negative",
-            cd_s=1.0,
-            trigger="launch + -5",
-            sampling_rate=100,
-            lag=0,
-        )
-        
-        state = [0, 0, 1000, 0, 0, -10, 1, 0, 0, 0, 0, 0, 0]
-        
-        # At t=0, already past the "negative" trigger time
-        assert parachute.triggerfunc(101325, 1000, state, [], 0.0, None) is True

@@ -200,5 +200,3 @@ def test_flight_with_mixed_trigger_types(
     
     # Check that parachute deployment happened
     assert hasattr(flight, "parachute_cd_s")
-
-
