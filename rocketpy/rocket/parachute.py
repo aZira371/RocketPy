@@ -46,15 +46,23 @@ class Parachute:
 
         - The string "apogee" which triggers the parachute at apogee, i.e.,
         when the rocket reaches its highest point and starts descending.
+        
+        - The string "launch + X" where X is a number in seconds. The parachute
+        will be ejected X seconds after launch (t=0). This is useful for
+        simulating delay charges that activate at a fixed time from launch.
+        
+        - The string "burnout + X" where X is a number in seconds. The parachute
+        will be ejected X seconds after motor burnout. This is useful for
+        simulating delay charges in motors with delay elements.
 
 
     Parachute.triggerfunc : function
         Trigger function created from the trigger used to evaluate the trigger
         condition for the parachute ejection system. It is a callable function
-        that takes three arguments: Freestream pressure in Pa, Height above
-        ground level in meters, and the state vector of the simulation. The
-        returns ``True`` if the parachute ejection system should be triggered
-        and ``False`` otherwise.
+        that takes six arguments: Freestream pressure in Pa, Height above
+        ground level in meters, the state vector of the simulation, sensors list,
+        current time t, and rocket object. It returns ``True`` if the parachute 
+        ejection system should be triggered and ``False`` otherwise.
 
         .. note:
 
@@ -153,6 +161,14 @@ class Parachute:
                 height above ground level.
             - The string "apogee" which triggers the parachute at apogee, i.e., \
                 when the rocket reaches its highest point and starts descending.
+            - The string "launch + X" where X is the delay in seconds from launch. \
+                For example, "launch + 5" triggers 5 seconds after launch. This is \
+                useful for simulating delay charges that activate at a fixed time \
+                from launch.
+            - The string "burnout + X" where X is the delay in seconds from motor \
+                burnout. For example, "burnout + 3.5" triggers 3.5 seconds after \
+                motor burnout. This is useful for simulating delay charges in motors \
+                with delay elements.
 
             .. note::
 
@@ -232,14 +248,19 @@ class Parachute:
             sig = signature(triggerfunc)
             if len(sig.parameters) == 3:
 
-                def triggerfunc(p, h, y, sensors):
+                def triggerfunc(p, h, y, sensors, t=None, rocket=None):
                     return trigger(p, h, y)
+
+            elif len(sig.parameters) == 4:
+
+                def triggerfunc(p, h, y, sensors, t=None, rocket=None):
+                    return trigger(p, h, y, sensors)
 
             self.triggerfunc = triggerfunc
 
         elif isinstance(trigger, (int, float)):
             # The parachute is deployed at a given height
-            def triggerfunc(p, h, y, sensors):  # pylint: disable=unused-argument
+            def triggerfunc(p, h, y, sensors, t=None, rocket=None):  # pylint: disable=unused-argument
                 # p = pressure considering parachute noise signal
                 # h = height above ground level considering parachute noise signal
                 # y = [x, y, z, vx, vy, vz, e0, e1, e2, e3, w1, w2, w3]
@@ -247,20 +268,74 @@ class Parachute:
 
             self.triggerfunc = triggerfunc
 
-        elif trigger.lower() == "apogee":
-            # The parachute is deployed at apogee
-            def triggerfunc(p, h, y, sensors):  # pylint: disable=unused-argument
-                # p = pressure considering parachute noise signal
-                # h = height above ground level considering parachute noise signal
-                # y = [x, y, z, vx, vy, vz, e0, e1, e2, e3, w1, w2, w3]
-                return y[5] < 0
+        elif isinstance(trigger, str):
+            trigger_lower = trigger.lower().strip()
+            
+            if trigger_lower == "apogee":
+                # The parachute is deployed at apogee
+                def triggerfunc(p, h, y, sensors, t=None, rocket=None):  # pylint: disable=unused-argument
+                    # p = pressure considering parachute noise signal
+                    # h = height above ground level considering parachute noise signal
+                    # y = [x, y, z, vx, vy, vz, e0, e1, e2, e3, w1, w2, w3]
+                    return y[5] < 0
 
-            self.triggerfunc = triggerfunc
+                self.triggerfunc = triggerfunc
+            
+            elif "+" in trigger_lower:
+                # Time-based trigger: "launch + X" or "burnout + X"
+                parts = trigger_lower.split("+")
+                if len(parts) != 2:
+                    raise ValueError(
+                        f"Invalid time-based trigger format for parachute '{self.name}'. "
+                        + "Expected format: 'launch + delay' or 'burnout + delay' "
+                        + "where delay is a number in seconds."
+                    )
+                
+                event = parts[0].strip()
+                try:
+                    delay = float(parts[1].strip())
+                except ValueError:
+                    raise ValueError(
+                        f"Invalid delay value in trigger '{trigger}' for parachute '{self.name}'. "
+                        + "Delay must be a number in seconds."
+                    )
+                
+                if event == "launch":
+                    # Deploy at launch time + delay
+                    def triggerfunc(p, h, y, sensors, t=None, rocket=None):  # pylint: disable=unused-argument
+                        if t is None:
+                            return False
+                        return t >= delay
+                    
+                    self.triggerfunc = triggerfunc
+                
+                elif event == "burnout":
+                    # Deploy at motor burnout time + delay
+                    def triggerfunc(p, h, y, sensors, t=None, rocket=None):  # pylint: disable=unused-argument
+                        if t is None or rocket is None:
+                            return False
+                        burnout_time = rocket.motor.burn_out_time
+                        return t >= burnout_time + delay
+                    
+                    self.triggerfunc = triggerfunc
+                
+                else:
+                    raise ValueError(
+                        f"Invalid time-based trigger event '{event}' for parachute '{self.name}'. "
+                        + "Supported events are 'launch' and 'burnout'."
+                    )
+            
+            else:
+                raise ValueError(
+                    f"Unable to set the trigger function for parachute '{self.name}'. "
+                    + "Trigger string must be 'apogee', 'launch + <delay>', or 'burnout + <delay>'. "
+                    + "See the Parachute class documentation for more information."
+                )
 
         else:
             raise ValueError(
                 f"Unable to set the trigger function for parachute '{self.name}'. "
-                + "Trigger must be a callable, a float value or the string 'apogee'. "
+                + "Trigger must be a callable, a float value, or a string. "
                 + "See the Parachute class documentation for more information."
             )
 
