@@ -1066,6 +1066,8 @@ class Flight:
                 height_above_ground_level,
                 self.y_sol,
                 self.sensors,
+                node.t,
+                self.rocket,
             ):
                 continue  # Check next parachute
 
@@ -1475,6 +1477,8 @@ class Flight:
                 height_above_ground_level,
                 overshootable_node.y_sol,
                 self.sensors,
+                overshootable_node.t,
+                self.rocket,
             ):
                 continue  # Check next parachute
 

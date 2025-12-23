@@ -54,7 +54,6 @@ class Parachute:
         - The string "burnout + X" where X is a number in seconds. The parachute
         will be ejected X seconds after motor burnout. This is useful for
         simulating delay charges in motors with delay elements.
-          when the rocket reaches its highest point and starts descending.
 
 
     Parachute.triggerfunc : function
