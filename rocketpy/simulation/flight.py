@@ -731,6 +731,8 @@ class Flight:
                         height_above_ground_level,
                         self.y_sol,
                         self.sensors,
+                        node.t,
+                        self.rocket,
                     ):
                         # Remove parachute from flight parachutes
                         self.parachutes.remove(parachute)
@@ -800,6 +802,124 @@ class Flight:
                     if self.__check_simulation_events(phase, phase_index, node_index):
                         break  # Stop if simulation termination event occurred
 
+                    # List and feed overshootable time nodes
+                    if self.time_overshoot:
+                        # Initialize phase overshootable time nodes
+                        overshootable_nodes = self.TimeNodes()
+                        # Add overshootable parachute time nodes
+                        overshootable_nodes.add_parachutes(
+                            self.parachutes, self.solution[-2][0], self.t
+                        )
+                        # Add last time node (always skipped)
+                        overshootable_nodes.add_node(self.t, [], [], [])
+                        if len(overshootable_nodes) > 1:
+                            # Sort and merge equal overshootable time nodes
+                            overshootable_nodes.sort()
+                            overshootable_nodes.merge()
+                            # Clear if necessary
+                            if overshootable_nodes[0].t == phase.t and phase.clear:
+                                overshootable_nodes[0].parachutes = []
+                                overshootable_nodes[0].callbacks = []
+                            # Feed overshootable time nodes trigger
+                            interpolator = phase.solver.dense_output()
+                            for (
+                                overshootable_index,
+                                overshootable_node,
+                            ) in self.time_iterator(overshootable_nodes):
+                                # Calculate state at node time
+                                overshootable_node.y_sol = interpolator(
+                                    overshootable_node.t
+                                )
+                                for parachute in overshootable_node.parachutes:
+                                    # Calculate and save pressure signal
+                                    (
+                                        noisy_pressure,
+                                        height_above_ground_level,
+                                    ) = self.__calculate_and_save_pressure_signals(
+                                        parachute,
+                                        overshootable_node.t,
+                                        overshootable_node.y_sol[2],
+                                    )
+
+                                    # Check for parachute trigger
+                                    if parachute.triggerfunc(
+                                        noisy_pressure,
+                                        height_above_ground_level,
+                                        overshootable_node.y_sol,
+                                        self.sensors,
+                                        overshootable_node.t,
+                                        self.rocket,
+                                    ):
+                                        # Remove parachute from flight parachutes
+                                        self.parachutes.remove(parachute)
+                                        # Create phase for time after detection and
+                                        # before inflation
+                                        # Must only be created if parachute has any lag
+                                        i = 1
+                                        if parachute.lag != 0:
+                                            self.flight_phases.add_phase(
+                                                overshootable_node.t,
+                                                phase.derivative,
+                                                clear=True,
+                                                index=phase_index + i,
+                                            )
+                                            i += 1
+                                        # Create flight phase for time after inflation
+                                        callbacks = [
+                                            lambda self,
+                                            parachute_cd_s=parachute.cd_s: setattr(
+                                                self, "parachute_cd_s", parachute_cd_s
+                                            ),
+                                            lambda self,
+                                            parachute_radius=parachute.radius: setattr(
+                                                self,
+                                                "parachute_radius",
+                                                parachute_radius,
+                                            ),
+                                            lambda self,
+                                            parachute_height=parachute.height: setattr(
+                                                self,
+                                                "parachute_height",
+                                                parachute_height,
+                                            ),
+                                            lambda self,
+                                            parachute_porosity=parachute.porosity: setattr(
+                                                self,
+                                                "parachute_porosity",
+                                                parachute_porosity,
+                                            ),
+                                            lambda self,
+                                            added_mass_coefficient=parachute.added_mass_coefficient: setattr(
+                                                self,
+                                                "parachute_added_mass_coefficient",
+                                                added_mass_coefficient,
+                                            ),
+                                        ]
+                                        self.flight_phases.add_phase(
+                                            overshootable_node.t + parachute.lag,
+                                            self.u_dot_parachute,
+                                            callbacks,
+                                            clear=False,
+                                            index=phase_index + i,
+                                        )
+                                        # Rollback history
+                                        self.t = overshootable_node.t
+                                        self.y_sol = overshootable_node.y_sol
+                                        self.solution[-1] = [
+                                            overshootable_node.t,
+                                            *overshootable_node.y_sol,
+                                        ]
+                                        # Prepare to leave loops and start new flight phase
+                                        overshootable_nodes.flush_after(
+                                            overshootable_index
+                                        )
+                                        phase.time_nodes.flush_after(node_index)
+                                        phase.time_nodes.add_node(self.t, [], [], [])
+                                        phase.solver.status = "finished"
+                                        # Save parachute event
+                                        self.parachute_events.append(
+                                            [self.t, parachute]
+                                        )
                     # Process overshootable time nodes if enabled
                     if self.time_overshoot and self.__process_overshootable_nodes(
                         phase, phase_index, node_index
@@ -946,6 +1066,8 @@ class Flight:
                 height_above_ground_level,
                 self.y_sol,
                 self.sensors,
+                node.t,
+                self.rocket,
             ):
                 continue  # Check next parachute
 
@@ -1355,6 +1477,8 @@ class Flight:
                 height_above_ground_level,
                 overshootable_node.y_sol,
                 self.sensors,
+                overshootable_node.t,
+                self.rocket,
             ):
                 continue  # Check next parachute
 
