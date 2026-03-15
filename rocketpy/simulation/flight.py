@@ -8,6 +8,7 @@ import numpy as np
 from scipy.integrate import BDF, DOP853, LSODA, RK23, RK45, OdeSolver, Radau
 
 from rocketpy.simulation.flight_data_exporter import FlightDataExporter
+from rocketpy.simulation.event import Event
 
 from ..mathutils.function import Function, funcify_method
 from ..mathutils.vector_matrix import Matrix, Vector
@@ -791,7 +792,14 @@ class Flight:
                         phase.time_nodes.add_node(self.t, [], [], [])
                         phase.solver.status = "finished"
                         # Save parachute event
-                        self.parachute_events.append([self.t, parachute])
+                        self.parachute_events.append(
+                            Event(
+                                time=self.t,
+                                trigger=parachute.trigger,
+                                event_type="parachute",
+                                action=parachute,
+                            )
+                        )
 
                 # Step through simulation
                 while phase.solver.status == "running":
@@ -1072,7 +1080,12 @@ class Flight:
                                         phase.solver.status = "finished"
                                         # Save parachute event
                                         self.parachute_events.append(
-                                            [self.t, parachute]
+                                            Event(
+                                                time=self.t,
+                                                trigger=parachute.trigger,
+                                                event_type="parachute",
+                                                action=parachute,
+                                            )
                                         )
 
                     # If controlled flight, post process must be done on sim time

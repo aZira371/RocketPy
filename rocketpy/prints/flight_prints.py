@@ -233,8 +233,8 @@ class _FlightPrints:
         if len(self.flight.parachute_events) == 0:
             print("No Parachute Events Were Triggered.")
         for event in self.flight.parachute_events:
-            trigger_time = event[0]
-            parachute = event[1]
+            trigger_time = event.time
+            parachute = event.action
             open_time = trigger_time + parachute.lag
             speed = self.flight.free_stream_speed(open_time)
             altitude = self.flight.z(open_time)
@@ -270,7 +270,7 @@ class _FlightPrints:
             num_parachute_events = sum(
                 1
                 for event in self.flight.parachute_events
-                if event[0] < self.flight.t_final
+                if event.time < self.flight.t_final
             )
             print(
                 f"Number of parachutes triggered until impact: {num_parachute_events}"
