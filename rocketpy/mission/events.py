@@ -48,6 +48,12 @@ class Event(ABC):
     def apply(self, branch, context):
         """Apply the event's effect to a flight branch.
 
+        Concrete implementations should mutate *branch* (e.g. spawn child
+        branches, update the body, activate recovery systems).  The default
+        stub in each concrete subclass is intentionally a no-op; the actual
+        orchestration is performed by the simulation engine which calls
+        :meth:`should_fire` and then :meth:`apply` at each time step.
+
         Parameters
         ----------
         branch : :class:`~rocketpy.simulation.FlightBranch`
@@ -95,10 +101,19 @@ class DeploymentEvent(Event):
             Active branch.
         context : object
             Simulation context.
+
+        Notes
+        -----
+        The actual separation logic is delegated to the Deployable's
+        :class:`~rocketpy.mission.SeparationModel` and
+        :class:`~rocketpy.mission.ParentUpdate`.  Orchestration is performed
+        by the simulation engine.
+
+        .. todo::
+            Wire up ``Deployable.separation.apply()`` and
+            ``Deployable.parent_update.apply()`` here once the simulation
+            engine integration layer is implemented.
         """
-        # The actual separation logic is delegated to the Deployable's
-        # SeparationModel and ParentUpdate.  This stub is intentional;
-        # the simulation engine is responsible for the full orchestration.
 
 
 class StageSeparationEvent(Event):
@@ -130,6 +145,14 @@ class StageSeparationEvent(Event):
             Active branch.
         context : object
             Simulation context.
+
+        Notes
+        -----
+        .. todo::
+            Implement stage separation: invoke
+            ``Stage.separation.apply()`` and ``Stage.parent_update.apply()``,
+            and spawn a new child :class:`~rocketpy.simulation.FlightBranch`
+            for the separated stage.
         """
 
 
@@ -162,6 +185,13 @@ class IgnitionEvent(Event):
             Active branch.
         context : object
             Simulation context.
+
+        Notes
+        -----
+        .. todo::
+            Implement motor ignition: activate the propulsion model on
+            the stage body and transition :attr:`Stage.state` to
+            :attr:`~rocketpy.mission.StageState.IGNITED`.
         """
 
 
@@ -194,4 +224,10 @@ class RecoveryEvent(Event):
             Active branch.
         context : object
             Simulation context.
+
+        Notes
+        -----
+        .. todo::
+            Implement recovery system activation: deploy the parachute or
+            other recovery device attached to the branch body.
         """

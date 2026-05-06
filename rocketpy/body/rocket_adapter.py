@@ -133,20 +133,28 @@ class RocketAdapter(BodyLike):
     def sensors(self):
         """Return the sensors attached to the rocket.
 
+        Accesses ``rocket.sensors``, which is a public
+        :class:`~rocketpy.rocket.Components` collection on the
+        :class:`~rocketpy.rocket.Rocket` class.
+
         Returns
         -------
-        list
-            ``rocket.sensors``.
+        list or Components
+            ``rocket.sensors``, or an empty list if the attribute is absent.
         """
         return getattr(self.rocket, "sensors", [])
 
     def controllers(self):
         """Return the active controllers attached to the rocket.
 
+        Accesses ``rocket._controllers``, which is a private list on the
+        :class:`~rocketpy.rocket.Rocket` class.
+
         Returns
         -------
         list
-            ``rocket._controllers``.
+            ``rocket._controllers``, or an empty list if the attribute is
+            absent.
         """
         return getattr(self.rocket, "_controllers", [])
 

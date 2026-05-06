@@ -53,21 +53,27 @@ class Attachment:
     def resolve_child_pose(self, parent_state):
         """Compute the initial child pose from the parent state.
 
+        .. note::
+            **Stub implementation** – this method currently returns
+            *parent_state* unchanged and does *not* apply the attachment
+            offsets (:attr:`parent_frame_position`,
+            :attr:`child_frame_position`) or :attr:`orientation`.  A full
+            6-DOF pose resolver will be implemented in a future iteration of
+            the multistage simulation engine.
+
         Parameters
         ----------
         parent_state : object
             Current state of the parent body (position, orientation, …).
-            The interpretation is left to the caller; this method simply
-            returns *parent_state* unchanged as a sensible default until a
-            full 6-DOF pose resolver is implemented.
 
         Returns
         -------
         object
-            Initial state for the child body.
+            Initial state for the child body (currently equal to
+            *parent_state*).
         """
-        # Placeholder: a full implementation would compose the parent
-        # pose with the attachment offsets and orientations.
+        # TODO: compose parent_state with attachment offsets and orientation
+        # to produce the true initial child pose.
         return parent_state
 
     def __repr__(self) -> str:

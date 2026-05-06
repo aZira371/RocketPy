@@ -6,6 +6,12 @@ from enum import Enum, auto
 class StageState(Enum):
     """Enumeration of the lifecycle states a :class:`Stage` can occupy.
 
+    Typical lifecycle progressions are:
+
+    - Powered stage: ``ATTACHED → IGNITED → SEPARATED → SPENT``
+    - Unpowered drop stage (e.g. fairing): ``ATTACHED → SEPARATED``
+    - Sustainer (never physically separated): ``ATTACHED → IGNITED → SPENT``
+
     Attributes
     ----------
     ATTACHED :
