@@ -1,3 +1,4 @@
+from .body import BodyLike, FlightBody, RocketAdapter
 from .control import _Controller
 from .environment import Environment, EnvironmentAnalysis
 from .mathutils import (
@@ -5,6 +6,22 @@ from .mathutils import (
     PiecewiseFunction,
     funcify_method,
     reset_funcified_methods,
+)
+from .mission import (
+    Attachment,
+    Deployable,
+    DeploymentEvent,
+    Event,
+    IgnitionEvent,
+    InstantaneousSeparation,
+    Mission,
+    NoOpParentUpdate,
+    ParentUpdate,
+    RecoveryEvent,
+    SeparationModel,
+    Stage,
+    StageSeparationEvent,
+    StageState,
 )
 from .motors import (
     CylindricalTank,
@@ -48,7 +65,7 @@ from .rocket import (
 )
 from .sensitivity import SensitivityModel
 from .sensors import Accelerometer, Barometer, GnssReceiver, Gyroscope
-from .simulation import Flight, MonteCarlo, MultivariateRejectionSampler
+from .simulation import Flight, FlightBranch, MonteCarlo, MultivariateRejectionSampler
 from .stochastic import (
     CustomSampler,
     StochasticAirBrakes,
