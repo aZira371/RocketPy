@@ -131,9 +131,10 @@ class RocketAdapter:
     def sensors(self):
         """Return the sensors attached to the rocket.
 
-        Accesses ``rocket.sensors``, which is a public
+        Accesses ``rocket.sensors`` when available, which is a public
         :class:`~rocketpy.rocket.Components` collection on the
-        :class:`~rocketpy.rocket.Rocket` class.
+        :class:`~rocketpy.rocket.Rocket` class in newer Rocket
+        configurations.
 
         Returns
         -------

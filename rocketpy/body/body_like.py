@@ -1,4 +1,8 @@
-"""BodyLike interface for the multistage mission architecture."""
+"""BodyLike protocol for the multistage mission architecture.
+
+This module defines a structural typing contract so bodies can satisfy the
+interface without inheriting from a shared base class.
+"""
 
 from typing import Protocol, runtime_checkable
 
