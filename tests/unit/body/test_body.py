@@ -46,8 +46,8 @@ def _make_flight_body(**kwargs):
 class TestBodyLikeProtocol:
     """BodyLike is a structural protocol."""
 
-    def test_cannot_instantiate_body_like(self):
-        """BodyLike must raise TypeError when instantiated directly."""
+    def test_protocol_not_directly_instantiable(self):
+        """BodyLike Protocol cannot be instantiated directly."""
         # Arrange / Act / Assert
         with pytest.raises(TypeError):
             BodyLike()  # type: ignore[abstract]

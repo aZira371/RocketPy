@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 
+
 class FlightBody:
     """A fully configurable flight body composed of interchangeable models.
 
