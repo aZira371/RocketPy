@@ -11,6 +11,8 @@ class BodyLike(Protocol):
     must implement this interface.  Both the native :class:`FlightBody`
     and the :class:`RocketAdapter` (which wraps a legacy :class:`Rocket`)
     satisfy it, so that the simulation layer can treat them uniformly.
+    This uses structural typing, so concrete bodies do not need to inherit
+    from :class:`BodyLike` to be accepted by the simulation layer.
 
     Attributes
     ----------
