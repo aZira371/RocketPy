@@ -39,12 +39,12 @@ def _make_flight_body(**kwargs):
 
 
 # ---------------------------------------------------------------------------
-# BodyLike ABC
+# BodyLike Protocol
 # ---------------------------------------------------------------------------
 
 
-class TestBodyLikeIsAbstract:
-    """BodyLike cannot be instantiated directly."""
+class TestBodyLikeProtocol:
+    """BodyLike is a structural protocol."""
 
     def test_cannot_instantiate_body_like(self):
         """BodyLike must raise TypeError when instantiated directly."""
@@ -52,16 +52,47 @@ class TestBodyLikeIsAbstract:
         with pytest.raises(TypeError):
             BodyLike()  # type: ignore[abstract]
 
-    def test_concrete_subclass_without_all_methods_raises(self):
-        """A class that only partially implements BodyLike must raise TypeError."""
+    def test_structural_conformance_without_inheritance(self):
+        """Objects can satisfy BodyLike without inheriting from it."""
+        # Arrange
+        class StructuralBody:
+            name = "structural"
 
-        class Partial(BodyLike):
-            @property
-            def name(self):
-                return "partial"
+            def mass(self, t):
+                return 1.0
 
-        with pytest.raises(TypeError):
-            Partial()
+            def inertia_tensor(self, t):
+                return (1.0, 1.0, 1.0, 0.0, 0.0, 0.0)
+
+            def center_of_mass(self, t):
+                return 0.0
+
+            def aerodynamic_model(self):
+                return None
+
+            def propulsion_model(self):
+                return None
+
+            def recovery_systems(self):
+                return []
+
+            def sensors(self):
+                return []
+
+            def controllers(self):
+                return []
+
+            def coordinate_system_orientation(self):
+                return "tail_to_nose"
+
+            def to_branch_ready_copy(self):
+                return self
+
+        # Act
+        instance = StructuralBody()
+
+        # Assert
+        assert isinstance(instance, BodyLike)
 
 
 # ---------------------------------------------------------------------------

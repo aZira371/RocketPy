@@ -2,10 +2,7 @@
 
 from copy import deepcopy
 
-from rocketpy.body.body_like import BodyLike
-
-
-class FlightBody(BodyLike):
+class FlightBody:
     """A fully configurable flight body composed of interchangeable models.
 
     Unlike :class:`~rocketpy.rocket.Rocket`, which is a rich user-facing
@@ -13,7 +10,8 @@ class FlightBody(BodyLike):
     that holds just enough information for the simulation engine to integrate
     the equations of motion.  Users who need the full Rocket builder
     experience can convert a :class:`~rocketpy.rocket.Rocket` to a
-    :class:`FlightBody` via :class:`RocketAdapter`.
+    :class:`FlightBody` via :class:`RocketAdapter`.  It satisfies the
+    :class:`~rocketpy.body.BodyLike` protocol.
 
     Parameters
     ----------

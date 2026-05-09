@@ -2,10 +2,7 @@
 
 from copy import deepcopy
 
-from rocketpy.body.body_like import BodyLike
-
-
-class RocketAdapter(BodyLike):
+class RocketAdapter:
     """Adapts a legacy :class:`~rocketpy.rocket.Rocket` to the
     :class:`BodyLike` interface.
 

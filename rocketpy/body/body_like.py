@@ -1,15 +1,16 @@
 """BodyLike interface for the multistage mission architecture."""
 
-from abc import ABC, abstractmethod
+from typing import Protocol, runtime_checkable
 
 
-class BodyLike(ABC):
-    """Abstract interface that every flight-ready body must satisfy.
+@runtime_checkable
+class BodyLike(Protocol):
+    """Structural interface that every flight-ready body must satisfy.
 
     Any object that can be integrated by the Flight simulation engine
     must implement this interface.  Both the native :class:`FlightBody`
     and the :class:`RocketAdapter` (which wraps a legacy :class:`Rocket`)
-    implement it, so that the simulation layer can treat them uniformly.
+    satisfy it, so that the simulation layer can treat them uniformly.
 
     Attributes
     ----------
@@ -18,7 +19,6 @@ class BodyLike(ABC):
     """
 
     @property
-    @abstractmethod
     def name(self) -> str:
         """Human-readable name of the body.
 
@@ -27,8 +27,8 @@ class BodyLike(ABC):
         str
             Body name.
         """
+        ...
 
-    @abstractmethod
     def mass(self, t: float) -> float:
         """Total mass of the body at time *t*, in kg.
 
@@ -42,8 +42,8 @@ class BodyLike(ABC):
         float
             Total mass in kg.
         """
+        ...
 
-    @abstractmethod
     def inertia_tensor(self, t: float):
         """Inertia tensor of the body at time *t*, in kg·m².
 
@@ -57,8 +57,8 @@ class BodyLike(ABC):
         array-like
             3×3 inertia tensor in kg·m².
         """
+        ...
 
-    @abstractmethod
     def center_of_mass(self, t: float) -> float:
         """Position of the center of mass along the body axis at time *t*.
 
@@ -75,8 +75,8 @@ class BodyLike(ABC):
         float
             Center-of-mass position in meters.
         """
+        ...
 
-    @abstractmethod
     def aerodynamic_model(self):
         """Return the aerodynamic model attached to this body.
 
@@ -85,8 +85,8 @@ class BodyLike(ABC):
         object
             Aerodynamic model instance.
         """
+        ...
 
-    @abstractmethod
     def propulsion_model(self):
         """Return the propulsion model attached to this body.
 
@@ -95,8 +95,8 @@ class BodyLike(ABC):
         object
             Propulsion model instance.
         """
+        ...
 
-    @abstractmethod
     def recovery_systems(self):
         """Return the list of recovery systems attached to this body.
 
@@ -105,8 +105,8 @@ class BodyLike(ABC):
         list
             Recovery systems.
         """
+        ...
 
-    @abstractmethod
     def sensors(self):
         """Return the list of sensors attached to this body.
 
@@ -115,8 +115,8 @@ class BodyLike(ABC):
         list
             Sensor instances.
         """
+        ...
 
-    @abstractmethod
     def controllers(self):
         """Return the list of active controllers attached to this body.
 
@@ -125,8 +125,8 @@ class BodyLike(ABC):
         list
             Controller instances.
         """
+        ...
 
-    @abstractmethod
     def coordinate_system_orientation(self) -> str:
         """Orientation convention for the body's coordinate system.
 
@@ -135,8 +135,8 @@ class BodyLike(ABC):
         str
             One of ``"tail_to_nose"`` or ``"nose_to_tail"``.
         """
+        ...
 
-    @abstractmethod
     def to_branch_ready_copy(self):
         """Return a simulation-ready deep copy of this body.
 
@@ -148,3 +148,4 @@ class BodyLike(ABC):
         BodyLike
             A deep copy suitable for a :class:`FlightBranch`.
         """
+        ...
