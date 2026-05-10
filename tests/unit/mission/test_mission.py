@@ -565,3 +565,16 @@ class TestMissionExecutor:
 
         with pytest.raises(TypeError, match="RocketAdapter"):
             executor.execute()
+
+    def test_execute_accepts_protocol_compatible_rocket_body(self):
+        """execute accepts bodies satisfying FlightCompatibleRocket protocol."""
+        mission = Mission()
+        mission.add_stage(_make_stage(name="stage_1", body=FakeRocket("raw_stage")))
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            flight_class=self.FakeFlight,
+        )
+        results = executor.execute()
+        assert results[0].flight.rocket.name == "raw_stage"

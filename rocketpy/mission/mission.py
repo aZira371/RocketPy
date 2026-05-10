@@ -182,6 +182,8 @@ class Mission:
         return dict(self._flight_inputs.get(key, {}))
 
     def _item_key(self, item) -> str:
+        # Internal opaque identifier used only as dict key to avoid collisions
+        # between Stage and Deployable items sharing the same name.
         return f"{type(item).__name__}:{item.name}"
 
     def _resolve_item_key(self, item) -> str:

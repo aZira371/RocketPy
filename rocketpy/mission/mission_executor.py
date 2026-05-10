@@ -90,6 +90,6 @@ class MissionExecutor:
         if isinstance(body, FlightCompatibleRocket):
             return body
         raise TypeError(
-            "MissionExecutor currently supports Stage/Deployable bodies that wrap "
-            "a Rocket via RocketAdapter."
+            "MissionExecutor currently supports Stage/Deployable bodies backed "
+            "by RocketAdapter or by objects satisfying FlightCompatibleRocket."
         )
