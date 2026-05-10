@@ -83,7 +83,7 @@ def _make_stage(**kwargs):
     return Stage(**defaults)
 
 
-class _FakeRocket:
+class FakeRocket:
     """Minimal fake rocket object for MissionExecutor tests."""
 
     def __init__(self, name="fake_rocket"):
@@ -92,7 +92,7 @@ class _FakeRocket:
 
 def _make_rocket_adapter(name="rocket_body"):
     """Create a RocketAdapter with a minimal fake rocket object."""
-    return RocketAdapter(_FakeRocket(name=name))
+    return RocketAdapter(FakeRocket(name=name))
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +503,7 @@ class TestMissionMissionMetadata:
 class TestMissionExecutor:
     """MissionExecutor runs mission items without requiring manual Flight setup."""
 
-    class _FakeFlight:
+    class FakeFlight:
         """Simple stand-in for rocketpy.simulation.Flight."""
 
         def __init__(self, rocket, environment, rail_length, **kwargs):
@@ -529,7 +529,7 @@ class TestMissionExecutor:
             environment=object(),
             rail_length=5.0,
             default_flight_inputs={"inclination": 80},
-            flight_class=self._FakeFlight,
+            flight_class=self.FakeFlight,
         )
 
         results = executor.execute()
@@ -549,7 +549,7 @@ class TestMissionExecutor:
             mission=mission,
             environment=object(),
             rail_length=5.0,
-            flight_class=self._FakeFlight,
+            flight_class=self.FakeFlight,
         )
 
         with pytest.raises(TypeError, match="RocketAdapter"):

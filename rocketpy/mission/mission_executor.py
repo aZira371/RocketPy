@@ -1,10 +1,24 @@
 """MissionExecutor – high-level API to execute all mission flight branches."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from rocketpy.body import RocketAdapter
 from rocketpy.simulation import Flight
+
+
+@runtime_checkable
+class FlightCompatibleRocket(Protocol):
+    """Structural contract for rocket objects accepted by Flight."""
+
+    def add_motor(self, motor, position):
+        """Add a motor to the rocket body."""
+
+    def total_mass(self, t: float) -> float:
+        """Return total mass at time *t*."""
+
+    def center_of_mass(self, t: float) -> float:
+        """Return center-of-mass position at time *t*."""
 
 
 @dataclass(frozen=True)
@@ -73,10 +87,7 @@ class MissionExecutor:
         """Extract a Flight-compatible rocket object from a mission body."""
         if isinstance(body, RocketAdapter):
             return body.rocket
-        if all(
-            hasattr(body, attr)
-            for attr in ("add_motor", "total_mass", "center_of_mass")
-        ):
+        if isinstance(body, FlightCompatibleRocket):
             return body
         raise TypeError(
             "MissionExecutor currently supports Stage/Deployable bodies that wrap "
