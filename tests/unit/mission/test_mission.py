@@ -31,15 +31,17 @@ from rocketpy.mission import (
 # ---------------------------------------------------------------------------
 
 
-def _make_body(name="body"):
+def _make_body(name="body", **kwargs):
     """Return a minimal FlightBody for testing."""
-    return FlightBody(
+    defaults = dict(
         name=name,
         geometry=0.05,
         mass_model=lambda t: 10.0,
         inertia_model=lambda t: (1.0, 1.0, 0.05, 0.0, 0.0, 0.0),
         center_of_mass_model=lambda t: 0.5,
     )
+    defaults.update(kwargs)
+    return FlightBody(**defaults)
 
 
 def _make_attachment():
@@ -554,7 +556,7 @@ class TestMissionExecutor:
     def test_execute_raises_for_non_rocket_body(self):
         """execute raises TypeError when body is not RocketAdapter-backed."""
         mission = Mission()
-        mission.add_stage(_make_stage(name="stage_1", body=_make_body("flight_body")))
+        mission.add_stage(_make_stage(name="stage_1", body=object()))
 
         executor = MissionExecutor(
             mission=mission,
@@ -563,7 +565,7 @@ class TestMissionExecutor:
             flight_class=self.FakeFlight,
         )
 
-        with pytest.raises(TypeError, match="RocketAdapter"):
+        with pytest.raises(TypeError, match="FlightBody"):
             executor.execute()
 
     def test_execute_accepts_protocol_compatible_rocket_body(self):
@@ -578,3 +580,17 @@ class TestMissionExecutor:
         )
         results = executor.execute()
         assert results[0].flight.rocket.name == "raw_stage"
+
+    def test_execute_accepts_flight_body_body(self):
+        """execute accepts FlightBody bodies by building PointMassRocket proxies."""
+        mission = Mission()
+        mission.add_stage(_make_stage(name="stage_1", body=_make_body("flight_body")))
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            flight_class=self.FakeFlight,
+        )
+        results = executor.execute()
+        assert type(results[0].flight.rocket).__name__ == "PointMassRocket"
+        assert results[0].flight.rocket.name == "flight_body"

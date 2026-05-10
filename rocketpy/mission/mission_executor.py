@@ -1,9 +1,12 @@
 """MissionExecutor – high-level API to execute all mission flight branches."""
 
+from copy import deepcopy
 from dataclasses import dataclass
+from numbers import Real
 from typing import Any, Protocol, runtime_checkable
 
-from rocketpy.body import RocketAdapter
+from rocketpy.body import FlightBody, RocketAdapter
+from rocketpy.rocket import PointMassRocket
 from rocketpy.simulation import Flight
 
 
@@ -87,9 +90,63 @@ class MissionExecutor:
         """Extract a Flight-compatible rocket object from a mission body."""
         if isinstance(body, RocketAdapter):
             return body.rocket
+        if isinstance(body, FlightBody):
+            return MissionExecutor._build_point_mass_from_flight_body(body)
         if isinstance(body, FlightCompatibleRocket):
             return body
         raise TypeError(
             "MissionExecutor currently supports Stage/Deployable bodies backed "
-            "by RocketAdapter or by objects satisfying FlightCompatibleRocket."
+            "by RocketAdapter, FlightBody, or by objects satisfying "
+            "FlightCompatibleRocket."
+        )
+
+    @staticmethod
+    def _build_point_mass_from_flight_body(body: FlightBody) -> PointMassRocket:
+        """Build a PointMassRocket proxy from a FlightBody mission item."""
+        radius = MissionExecutor._extract_reference_radius(body.geometry)
+        mass = body.mass(0.0)
+        center_of_mass = body.center_of_mass(0.0)
+        rocket = PointMassRocket(
+            radius=radius,
+            mass=mass,
+            center_of_mass_without_motor=center_of_mass,
+            power_off_drag=0.75,
+            power_on_drag=0.75,
+        )
+        rocket.name = body.name
+
+        orientation = body.coordinate_system_orientation()
+        rocket.coordinate_system_orientation = orientation
+        rocket._csys = 1 if orientation == "tail_to_nose" else -1
+
+        rocket.parachutes = [deepcopy(system) for system in body.recovery_systems()]
+
+        propulsion = body.propulsion_model()
+        if propulsion is not None:
+            nozzle_position = getattr(propulsion, "nozzle_position", 0.0)
+            rocket.add_motor(deepcopy(propulsion), position=nozzle_position)
+
+        return rocket
+
+    @staticmethod
+    def _extract_reference_radius(geometry: Any) -> float:
+        """Extract a positive reference radius from a FlightBody geometry field."""
+        candidates = [geometry]
+        for attr in ("radius", "reference_radius"):
+            candidates.append(getattr(geometry, attr, None))
+
+        for candidate in candidates:
+            if isinstance(candidate, Real):
+                radius = float(candidate)
+                if radius > 0:
+                    return radius
+                raise ValueError(
+                    "FlightBody geometry radius must be a positive value, got "
+                    f"{radius}."
+                )
+
+        raise TypeError(
+            "MissionExecutor could not infer a reference radius from FlightBody "
+            "geometry. Provide a numeric geometry value or an object exposing "
+            "'radius' or 'reference_radius'."
         )
