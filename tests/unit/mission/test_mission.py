@@ -89,6 +89,17 @@ class FakeRocket:
     def __init__(self, name="fake_rocket"):
         self.name = name
 
+    def add_motor(self, motor, position):
+        """No-op helper to satisfy rocket-like interface in tests."""
+
+    def total_mass(self, t):
+        """Return a deterministic mass for test doubles."""
+        return 1.0
+
+    def center_of_mass(self, t):
+        """Return a deterministic center-of-mass value for test doubles."""
+        return 0.0
+
 
 def _make_rocket_adapter(name="rocket_body"):
     """Create a RocketAdapter with a minimal fake rocket object."""
