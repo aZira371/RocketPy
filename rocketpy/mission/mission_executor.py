@@ -109,9 +109,9 @@ class MissionExecutor:
         Notes
         -----
         This proxy uses the `FlightBody` snapshot at ``t=0`` for dry mass and
-        center of mass. The goal is to provide an immediate Flight-compatible
-        representation for mission execution of deployables, especially passive
-        payloads and recovery-only bodies.
+        center of mass. This is a pragmatic approximation for mission execution
+        of deployables, especially passive payloads and recovery-only bodies,
+        and may be less representative for strongly time-varying bodies.
         """
         radius = MissionExecutor._extract_reference_radius(body.geometry)
         # Use t=0 as a stable initialization snapshot for point-mass proxy setup.
@@ -136,6 +136,8 @@ class MissionExecutor:
         rocket.coordinate_system_orientation = orientation
         rocket._csys = 1 if orientation == "tail_to_nose" else -1
 
+        # Recovery systems are pre-built Parachute objects on FlightBody; assign
+        # deep-copied instances directly to preserve trigger/lags/noise settings.
         rocket.parachutes = [deepcopy(system) for system in body.recovery_systems()]
 
         propulsion = body.propulsion_model()

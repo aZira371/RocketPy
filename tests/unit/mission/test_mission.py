@@ -104,7 +104,7 @@ class FakeRocket:
 
 
 class _UnsupportedBody:
-    """Intentional unsupported mission body type for executor error-path tests."""
+    """Minimal stub used to assert unsupported-body TypeError paths."""
 
 
 def _make_rocket_adapter(name="rocket_body"):
@@ -585,7 +585,7 @@ class TestMissionExecutor:
         results = executor.execute()
         assert results[0].flight.rocket.name == "raw_stage"
 
-    def test_execute_accepts_flight_body_body(self):
+    def test_execute_accepts_flight_body(self):
         """execute accepts FlightBody bodies by building PointMassRocket proxies."""
         mission = Mission()
         mission.add_stage(_make_stage(name="stage_1", body=_make_body("flight_body")))
