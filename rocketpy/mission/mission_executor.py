@@ -9,6 +9,8 @@ from rocketpy.body import FlightBody, RocketAdapter
 from rocketpy.rocket import PointMassRocket
 from rocketpy.simulation import Flight
 
+DEFAULT_FLIGHT_BODY_DRAG_COEFFICIENT = 0.75
+
 
 @runtime_checkable
 class FlightCompatibleRocket(Protocol):
@@ -117,7 +119,7 @@ class MissionExecutor:
         center_of_mass = body.center_of_mass(0.0)
         # Conservative default Cd for a generic bluff-body payload proxy.
         # These can be superseded by parachute/recovery deployment dynamics.
-        default_drag_coefficient = 0.75
+        default_drag_coefficient = DEFAULT_FLIGHT_BODY_DRAG_COEFFICIENT
         rocket = PointMassRocket(
             radius=radius,
             mass=mass,
@@ -130,6 +132,7 @@ class MissionExecutor:
         orientation = body.coordinate_system_orientation()
         # PointMassRocket currently has no public API to re-evaluate `_csys`
         # after initialization, so we synchronize both orientation fields here.
+        # TODO: Replace this with a public PointMassRocket orientation API.
         rocket.coordinate_system_orientation = orientation
         rocket._csys = 1 if orientation == "tail_to_nose" else -1
 
