@@ -6,7 +6,7 @@ hierarchy, SeparationModel, ParentUpdate, StageState.
 
 import pytest
 
-from rocketpy.body import FlightBody
+from rocketpy.body import FlightBody, RocketAdapter
 from rocketpy.mission import (
     Attachment,
     Deployable,
@@ -15,6 +15,7 @@ from rocketpy.mission import (
     IgnitionEvent,
     InstantaneousSeparation,
     Mission,
+    MissionExecutor,
     NoOpParentUpdate,
     ParentUpdate,
     RecoveryEvent,
@@ -80,6 +81,18 @@ def _make_stage(**kwargs):
     }
     defaults.update(kwargs)
     return Stage(**defaults)
+
+
+class _FakeRocket:
+    """Minimal fake rocket object for MissionExecutor tests."""
+
+    def __init__(self, name="fake_rocket"):
+        self.name = name
+
+
+def _make_rocket_adapter(name="rocket_body"):
+    """Create a RocketAdapter with a minimal fake rocket object."""
+    return RocketAdapter(_FakeRocket(name=name))
 
 
 # ---------------------------------------------------------------------------
@@ -448,3 +461,96 @@ class TestMissionAttachedItems:
         m.add_stage(_make_stage())
         m.add_deployable(_make_deployable())
         assert len(m) == 2
+
+
+class TestMissionMissionMetadata:
+    """Mission exposes mission-wide stage and connection metadata."""
+
+    def test_number_of_stages_matches_added_stages(self):
+        """number_of_stages returns the stage count."""
+        mission = Mission()
+        mission.add_stage(_make_stage(name="stage_1"))
+        mission.add_stage(_make_stage(name="stage_2"))
+        assert mission.number_of_stages == 2
+
+    def test_connection_map_contains_attachment_data(self):
+        """connection_map returns attachment metadata for mission items."""
+        mission = Mission()
+        stage = _make_stage(name="stage_1")
+        mission.add_stage(stage)
+        connection = mission.connection_map()["stage_1"]
+        assert connection["parent_frame_position"] == [0.0, 0.0, 1.0]
+        assert connection["child_frame_position"] == [0.0, 0.0, 0.0]
+        assert connection["constraints"] == "rigid"
+
+    def test_set_and_get_flight_inputs_by_name(self):
+        """set_flight_inputs/get_flight_inputs store and return per-item inputs."""
+        mission = Mission()
+        stage = _make_stage(name="stage_1")
+        mission.add_stage(stage)
+        mission.set_flight_inputs("stage_1", inclination=85, heading=10)
+        configured = mission.get_flight_inputs(stage)
+        assert configured["inclination"] == 85
+        assert configured["heading"] == 10
+
+    def test_set_flight_inputs_raises_for_unknown_item(self):
+        """set_flight_inputs raises KeyError when item is unknown."""
+        mission = Mission()
+        with pytest.raises(KeyError):
+            mission.set_flight_inputs("missing_stage", inclination=85)
+
+
+class TestMissionExecutor:
+    """MissionExecutor runs mission items without requiring manual Flight setup."""
+
+    class _FakeFlight:
+        """Simple stand-in for rocketpy.simulation.Flight."""
+
+        def __init__(self, rocket, environment, rail_length, **kwargs):
+            self.rocket = rocket
+            self.environment = environment
+            self.rail_length = rail_length
+            self.kwargs = kwargs
+
+    def test_execute_runs_stage_and_deployable(self):
+        """execute runs all mission attached items in mission order."""
+        mission = Mission()
+        stage = _make_stage(name="stage_1", body=_make_rocket_adapter("stage_rocket"))
+        deployable = _make_deployable(
+            name="payload", body=_make_rocket_adapter("payload_rocket")
+        )
+        mission.add_stage(stage)
+        mission.add_deployable(deployable)
+        mission.set_flight_inputs("stage_1", heading=15)
+        mission.set_flight_inputs("payload", heading=45)
+
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            default_flight_inputs={"inclination": 80},
+            flight_class=self._FakeFlight,
+        )
+
+        results = executor.execute()
+
+        assert [result.item_name for result in results] == ["stage_1", "payload"]
+        assert results[0].flight.kwargs["inclination"] == 80
+        assert results[0].flight.kwargs["heading"] == 15
+        assert results[1].flight.kwargs["heading"] == 45
+        assert results[1].flight.kwargs["initial_solution"] is results[0].flight
+
+    def test_execute_raises_for_non_rocket_body(self):
+        """execute raises TypeError when body is not RocketAdapter-backed."""
+        mission = Mission()
+        mission.add_stage(_make_stage(name="stage_1", body=_make_body("flight_body")))
+
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            flight_class=self._FakeFlight,
+        )
+
+        with pytest.raises(TypeError, match="RocketAdapter"):
+            executor.execute()

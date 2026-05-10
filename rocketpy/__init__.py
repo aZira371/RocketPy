@@ -15,6 +15,8 @@ from .mission import (
     IgnitionEvent,
     InstantaneousSeparation,
     Mission,
+    MissionExecutionResult,
+    MissionExecutor,
     NoOpParentUpdate,
     ParentUpdate,
     RecoveryEvent,

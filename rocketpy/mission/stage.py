@@ -71,8 +71,12 @@ class Stage(AttachedItem):
 
         self.separation_event = separation_event
         self.ignition_event = ignition_event
-        self.separation = separation if separation is not None else InstantaneousSeparation()
-        self.parent_update = parent_update if parent_update is not None else NoOpParentUpdate()
+        self.separation = (
+            separation if separation is not None else InstantaneousSeparation()
+        )
+        self.parent_update = (
+            parent_update if parent_update is not None else NoOpParentUpdate()
+        )
         self.state = StageState.ATTACHED
 
     def validate(self):

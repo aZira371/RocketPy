@@ -2063,9 +2063,7 @@ class Rocket:
         from rocketpy.mission.stage import Stage  # local import avoids circularity
 
         if not isinstance(stage, Stage):
-            raise TypeError(
-                f"Expected a Stage instance, got {type(stage).__name__!r}."
-            )
+            raise TypeError(f"Expected a Stage instance, got {type(stage).__name__!r}.")
         stage.validate()
         self._stages.append(stage)
 
@@ -2125,9 +2123,7 @@ class Rocket:
                     return s
             raise KeyError(f"No stage named {stage!r} found.")
         else:
-            raise TypeError(
-                f"stage must be int or str, got {type(stage).__name__!r}."
-            )
+            raise TypeError(f"stage must be int or str, got {type(stage).__name__!r}.")
 
     def attached_items(self):
         """Return all attached mission items (stages then deployables).

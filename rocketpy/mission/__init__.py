@@ -11,6 +11,7 @@ from rocketpy.mission.events import (
     StageSeparationEvent,
 )
 from rocketpy.mission.mission import Mission
+from rocketpy.mission.mission_executor import MissionExecutionResult, MissionExecutor
 from rocketpy.mission.parent_update import NoOpParentUpdate, ParentUpdate
 from rocketpy.mission.separation_model import InstantaneousSeparation, SeparationModel
 from rocketpy.mission.stage import Stage
@@ -25,6 +26,8 @@ __all__ = [
     "IgnitionEvent",
     "InstantaneousSeparation",
     "Mission",
+    "MissionExecutionResult",
+    "MissionExecutor",
     "NoOpParentUpdate",
     "ParentUpdate",
     "RecoveryEvent",

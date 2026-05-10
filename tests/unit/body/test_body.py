@@ -48,6 +48,7 @@ class TestBodyLikeProtocol:
 
     def test_structural_conformance_without_inheritance(self):
         """Objects can satisfy BodyLike without inheriting from it."""
+
         # Arrange
         class StructuralBody:
             name = "structural"

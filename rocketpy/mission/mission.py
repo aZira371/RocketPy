@@ -1,5 +1,7 @@
 """Mission – top-level container for a multistage rocket mission."""
 
+from typing import Any
+
 
 class Mission:
     """Container that stores all mission items for a multistage flight.
@@ -39,6 +41,7 @@ class Mission:
         self.name = name
         self.stages: list = []
         self.deployables: list = []
+        self._flight_inputs: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Mutating helpers
@@ -63,11 +66,10 @@ class Mission:
         from rocketpy.mission.stage import Stage  # local import to avoid circularity
 
         if not isinstance(stage, Stage):
-            raise TypeError(
-                f"Expected a Stage instance, got {type(stage).__name__!r}."
-            )
+            raise TypeError(f"Expected a Stage instance, got {type(stage).__name__!r}.")
         stage.validate()
         self.stages.append(stage)
+        self._flight_inputs.setdefault(self._item_key(stage), {})
 
     def add_deployable(self, deployable):
         """Append a deployable to this mission.
@@ -94,6 +96,7 @@ class Mission:
             )
         deployable.validate()
         self.deployables.append(deployable)
+        self._flight_inputs.setdefault(self._item_key(deployable), {})
 
     # ------------------------------------------------------------------
     # Query helpers
@@ -110,6 +113,88 @@ class Mission:
             Combined list of :attr:`stages` followed by :attr:`deployables`.
         """
         return list(self.stages) + list(self.deployables)
+
+    @property
+    def number_of_stages(self) -> int:
+        """Number of stages registered in this mission."""
+        return len(self.stages)
+
+    def connection_map(self) -> dict[str, dict[str, Any]]:
+        """Return mission attachment metadata keyed by item name.
+
+        Returns
+        -------
+        dict[str, dict[str, Any]]
+            For each stage/deployable item, stores its parent/child attachment
+            frame positions, orientation and constraints.
+        """
+        connections = {}
+        for item in self.attached_items():
+            attachment = item.attachment
+            connections[item.name] = {
+                "parent_frame_position": attachment.parent_frame_position,
+                "child_frame_position": attachment.child_frame_position,
+                "orientation": attachment.orientation,
+                "constraints": attachment.constraints,
+            }
+        return connections
+
+    def set_flight_inputs(self, item, **flight_inputs):
+        """Set per-item inputs used by :class:`MissionExecutor`.
+
+        Parameters
+        ----------
+        item : :class:`~rocketpy.mission.AttachedItem` or str
+            Attached item instance, or its name.
+        **flight_inputs
+            Keyword arguments forwarded to ``rocketpy.simulation.Flight``
+            when this mission item is executed.
+
+        Raises
+        ------
+        KeyError
+            If *item* does not belong to this mission.
+        """
+        key = self._resolve_item_key(item)
+        current = dict(self._flight_inputs.get(key, {}))
+        current.update(flight_inputs)
+        self._flight_inputs[key] = current
+
+    def get_flight_inputs(self, item) -> dict[str, Any]:
+        """Return configured per-item flight inputs.
+
+        Parameters
+        ----------
+        item : :class:`~rocketpy.mission.AttachedItem` or str
+            Attached item instance, or its name.
+
+        Returns
+        -------
+        dict[str, Any]
+            Copy of configured inputs. Empty dict when not configured.
+
+        Raises
+        ------
+        KeyError
+            If *item* does not belong to this mission.
+        """
+        key = self._resolve_item_key(item)
+        return dict(self._flight_inputs.get(key, {}))
+
+    def _item_key(self, item) -> str:
+        return f"{type(item).__name__}:{item.name}"
+
+    def _resolve_item_key(self, item) -> str:
+        if isinstance(item, str):
+            for attached_item in self.attached_items():
+                if attached_item.name == item:
+                    return self._item_key(attached_item)
+            raise KeyError(f"No attached mission item named {item!r}.")
+
+        for attached_item in self.attached_items():
+            if attached_item is item:
+                return self._item_key(attached_item)
+        raise KeyError("Attached mission item does not belong to this mission.")
 
     # ------------------------------------------------------------------
     # Dunder

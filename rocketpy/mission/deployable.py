@@ -57,8 +57,12 @@ class Deployable(AttachedItem):
         super().__init__(name, body, attachment, events=all_events)
 
         self.deployment_event = deployment_event
-        self.separation = separation if separation is not None else InstantaneousSeparation()
-        self.parent_update = parent_update if parent_update is not None else NoOpParentUpdate()
+        self.separation = (
+            separation if separation is not None else InstantaneousSeparation()
+        )
+        self.parent_update = (
+            parent_update if parent_update is not None else NoOpParentUpdate()
+        )
 
     def validate(self):
         """Validate that this deployable is correctly configured.
