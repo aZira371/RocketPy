@@ -103,6 +103,10 @@ class FakeRocket:
         return 0.0
 
 
+class UnsupportedBody:
+    """Intentional unsupported mission body type for executor error-path tests."""
+
+
 def _make_rocket_adapter(name="rocket_body"):
     """Create a RocketAdapter with a minimal fake rocket object."""
     return RocketAdapter(FakeRocket(name=name))
@@ -556,7 +560,7 @@ class TestMissionExecutor:
     def test_execute_raises_for_non_rocket_body(self):
         """execute raises TypeError when body is not RocketAdapter-backed."""
         mission = Mission()
-        mission.add_stage(_make_stage(name="stage_1", body=object()))
+        mission.add_stage(_make_stage(name="stage_1", body=UnsupportedBody()))
 
         executor = MissionExecutor(
             mission=mission,

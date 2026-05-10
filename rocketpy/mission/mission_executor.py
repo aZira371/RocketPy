@@ -102,20 +102,34 @@ class MissionExecutor:
 
     @staticmethod
     def _build_point_mass_from_flight_body(body: FlightBody) -> PointMassRocket:
-        """Build a PointMassRocket proxy from a FlightBody mission item."""
+        """Build a PointMassRocket proxy from a FlightBody mission item.
+
+        Notes
+        -----
+        This proxy uses the `FlightBody` snapshot at ``t=0`` for dry mass and
+        center of mass. The goal is to provide an immediate Flight-compatible
+        representation for mission execution of deployables, especially passive
+        payloads and recovery-only bodies.
+        """
         radius = MissionExecutor._extract_reference_radius(body.geometry)
+        # Use t=0 as a stable initialization snapshot for point-mass proxy setup.
         mass = body.mass(0.0)
         center_of_mass = body.center_of_mass(0.0)
+        # Conservative default Cd for a generic bluff-body payload proxy.
+        # These can be superseded by parachute/recovery deployment dynamics.
+        default_drag_coefficient = 0.75
         rocket = PointMassRocket(
             radius=radius,
             mass=mass,
             center_of_mass_without_motor=center_of_mass,
-            power_off_drag=0.75,
-            power_on_drag=0.75,
+            power_off_drag=default_drag_coefficient,
+            power_on_drag=default_drag_coefficient,
         )
         rocket.name = body.name
 
         orientation = body.coordinate_system_orientation()
+        # PointMassRocket currently has no public API to re-evaluate `_csys`
+        # after initialization, so we synchronize both orientation fields here.
         rocket.coordinate_system_orientation = orientation
         rocket._csys = 1 if orientation == "tail_to_nose" else -1
 
