@@ -586,9 +586,10 @@ class TestMissionExecutor:
         assert results[0].flight.rocket.name == "raw_stage"
 
     def test_execute_accepts_flight_body(self):
-        """execute accepts FlightBody bodies by building PointMassRocket proxies."""
+        """execute accepts FlightBody bodies without converting them."""
         mission = Mission()
-        mission.add_stage(_make_stage(name="stage_1", body=_make_body("flight_body")))
+        body = _make_body("flight_body")
+        mission.add_stage(_make_stage(name="stage_1", body=body))
         executor = MissionExecutor(
             mission=mission,
             environment=object(),
@@ -596,5 +597,4 @@ class TestMissionExecutor:
             flight_class=self.FakeFlight,
         )
         results = executor.execute()
-        assert type(results[0].flight.rocket).__name__ == "PointMassRocket"
-        assert results[0].flight.rocket.name == "flight_body"
+        assert results[0].flight.rocket is body
