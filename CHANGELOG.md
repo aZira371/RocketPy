@@ -32,6 +32,8 @@ Attention: The newest changes should be on top -->
 
 ### Added
 
+
+- ENH: Function vectorized speed-up and refactor [#1049](https://github.com/RocketPy-Team/RocketPy/pull/1049)
 - ENH: ENH: Refactor flight.py latitude/longitude to use inverted_haversine [#1055](https://github.com/RocketPy-Team/RocketPy/pull/1055)
 - ENH: TST: Add unit tests for evaluate_reduced_mass and remove TODO [#1051](https://github.com/RocketPy-Team/RocketPy/pull/1051)
 - ENH: FIX: pre release hardening [#1047](https://github.com/RocketPy-Team/RocketPy/pull/1047)
