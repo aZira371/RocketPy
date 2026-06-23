@@ -631,6 +631,27 @@ class _FlightPrints:
             f"at {self.flight.min_stability_margin_time:.2f} s"
         )
 
+        out_of_rail_time = self.flight.out_of_rail_time
+        # The margins above describe the pitch plane. For a non-axisymmetric
+        # rocket, also report the yaw-plane margin at rail departure.
+        if not self.flight.rocket.is_axisymmetric:
+            print(
+                "Out of Rail Stability Margin - yaw: "
+                f"{self.flight.stability_margin_yaw.get_value_opt(out_of_rail_time):.3f} c"
+            )
+
+        # Dynamic stability at rail departure (representative powered condition).
+        two_pi = 6.283185307179586
+        natural_frequency = self.flight.pitch_natural_frequency.get_value_opt(
+            out_of_rail_time
+        )
+        damping_ratio = self.flight.pitch_damping_ratio.get_value_opt(out_of_rail_time)
+        print(
+            f"Pitch Natural Frequency (out of rail): "
+            f"{natural_frequency / two_pi:.2f} Hz"
+        )
+        print(f"Pitch Damping Ratio (out of rail): {damping_ratio:.3f}")
+
     def all(self):
         """Prints out all data available about the Flight. This method invokes
         all other print methods in the class.

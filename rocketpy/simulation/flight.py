@@ -2305,23 +2305,288 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
 
     @funcify_method("Time (s)", "Stability Margin (c)", "linear", "zero")
     def stability_margin(self):
-        """Stability margin of the rocket along the flight, it considers the
-        variation of the center of pressure position according to the mach
-        number, as well as the variation of the center of gravity position
-        according to the propellant mass evolution.
+        """Linear stability margin along the flight, in calibers.
 
-        Parameters
-        ----------
-        None
+        This is the classical (aerodynamic-center) margin: it evaluates the
+        rocket's linearized stability margin
+        (:meth:`Rocket.stability_margin`) at the realized flight Mach and time at
+        each instant, capturing the Mach variation of the aerodynamic center
+        together with the center-of-mass shift as propellant burns. It is
+        well-conditioned and never spikes. For the nonlinear margin that follows
+        the center of pressure at the actual angle of attack/sideslip, see
+        :meth:`realized_stability_margin`.
 
         Returns
         -------
         stability : rocketpy.Function
-            Stability margin as a rocketpy.Function of time. The stability margin
-            is defined as the distance between the center of pressure and the
-            center of gravity, divided by the rocket diameter.
+            Stability margin in calibers as a function of time. A positive
+            margin (aerodynamic center behind the center of mass) is the classic
+            passive-stability condition.
         """
         return [(t, self.rocket.stability_margin(m, t)) for t, m in self.mach_number]
+
+    @funcify_method("Time (s)", "Stability Margin - Yaw (c)", "linear", "zero")
+    def stability_margin_yaw(self):
+        """Linear yaw-plane stability margin along the flight, in calibers.
+
+        Yaw-plane counterpart of :meth:`stability_margin`, using the rocket's
+        yaw-plane aerodynamic center (:meth:`Rocket.stability_margin_yaw`).
+        Equals :meth:`stability_margin` for an axisymmetric rocket; for a
+        non-axisymmetric rocket (e.g. single-plane canards) it differs, since the
+        pitch and yaw aerodynamic centers no longer coincide.
+
+        Returns
+        -------
+        stability : rocketpy.Function
+            Yaw-plane stability margin in calibers as a function of time.
+        """
+        return [
+            (t, self.rocket.stability_margin_yaw(m, t)) for t, m in self.mach_number
+        ]
+
+    @funcify_method("Time (s)", "Realized Stability Margin (c)", "linear", "zero")
+    def realized_stability_margin(self):
+        """Nonlinear (realized) stability margin along the flight, in calibers.
+
+        Co-equal companion to :meth:`stability_margin`: instead of the
+        aerodynamic center it uses the rocket's *nonlinear* center of pressure
+        (:meth:`Rocket.center_of_pressure`) at the realized flight state -- the
+        actual angle of attack, sideslip, Mach and Reynolds at each time step --
+        so it reveals how the center of pressure travels with incidence (and,
+        for non-axisymmetric rockets, combines the pitch and yaw planes at the
+        actual combined incidence).
+
+        For a non-axisymmetric rocket the margin is **direction-dependent** (the
+        pitch and yaw planes differ), and during most of the flight the rocket
+        flies at near-zero incidence, where the *direction* of the residual
+        incidence vector is numerical noise (slight coning). Reporting the
+        directional center of pressure there would make the margin swing between
+        the pitch- and yaw-plane values. To avoid that, the realized value is
+        blended into the linear margin by how much real incidence there is: at
+        negligible incidence the result is the linear :meth:`stability_margin`,
+        and only a genuine disturbance (a few degrees of incidence) reveals the
+        nonlinear travel. The value also falls back to the linear margin where
+        the dynamic pressure is negligible (rail, rest, apogee).
+
+        Returns
+        -------
+        stability : rocketpy.Function
+            Realized stability margin in calibers as a function of time.
+        """
+        csys = self.rocket._csys
+        diameter = 2 * self.rocket.radius
+        time = self.time
+
+        alpha = np.array(
+            [self.partial_angle_of_attack.get_value_opt(t) for t in time]
+        )
+        beta = np.array([self.angle_of_sideslip.get_value_opt(t) for t in time])
+
+        center_of_pressure = np.array(
+            [
+                self.rocket.center_of_pressure(
+                    np.deg2rad(a),
+                    np.deg2rad(b),
+                    self.mach_number.get_value_opt(t),
+                    self.reynolds_number.get_value_opt(t),
+                )
+                for a, b, t in zip(alpha, beta, time)
+            ]
+        )
+        center_of_mass = np.array(
+            [self.rocket.center_of_mass.get_value_opt(t) for t in time]
+        )
+        margin_realized = (center_of_mass - center_of_pressure) / diameter * csys
+
+        margin_model = np.array(
+            [
+                self.rocket.stability_margin.get_value_opt(
+                    self.mach_number.get_value_opt(t), t
+                )
+                for t in time
+            ]
+        )
+
+        # Weight the (direction-dependent) realized value by how much real
+        # incidence there is, with a smoothstep ramp up to ~2 deg, so the
+        # near-zero-incidence direction noise collapses to the linear margin.
+        incidence = np.hypot(alpha, beta)
+        weight = np.clip(incidence / 2.0, 0.0, 1.0)
+        weight = weight**2 * (3.0 - 2.0 * weight)
+        margin_blended = (1.0 - weight) * margin_model + weight * margin_realized
+
+        # Fall back fully to the linear margin where the rocket is barely moving
+        # (dynamic pressure below 1% of its flight-wide peak: rail, rest, apogee).
+        dynamic_pressure = np.array(
+            [self.dynamic_pressure.get_value_opt(t) for t in time]
+        )
+        meaningful = dynamic_pressure > 0.01 * dynamic_pressure.max()
+        margin = np.where(meaningful, margin_blended, margin_model)
+
+        return np.column_stack((time, margin))
+
+    # Dynamic stability
+    def _lateral_inertia(self, dry_lateral_inertia, motor_lateral_inertia):
+        """Lateral moment of inertia about the instantaneous center of mass, as
+        an array over ``self.time``. Uses the reduced-mass formulation of the
+        equations of motion: ``I_L = I_dry + I_motor(t) + mu(t) b^2`` with
+        ``mu`` the dry/propellant reduced mass and ``b`` the (initial)
+        dry-mass-to-propellant distance."""
+        dry_mass = self.rocket.dry_mass
+        b = (
+            -(
+                self.rocket.center_of_propellant_position.get_value_opt(0)
+                - self.rocket.center_of_dry_mass_position
+            )
+            * self.rocket._csys
+        )
+        inertia = np.empty(len(self.time))
+        for i, t in enumerate(self.time):
+            propellant_mass = self.rocket.motor.propellant_mass.get_value_opt(t)
+            total = propellant_mass + dry_mass
+            mu = (propellant_mass * dry_mass / total) if total > 0 else 0.0
+            inertia[i] = (
+                dry_lateral_inertia
+                + motor_lateral_inertia.get_value_opt(t)
+                + mu * b**2
+            )
+        return inertia
+
+    def _dynamic_stability(self, lift_slope, stability_margin, lateral_inertia):
+        """Linearized oscillator coefficients for one plane, as arrays over
+        ``self.time``: corrective moment coefficient ``C1`` (restoring moment per
+        radian), damping moment coefficient ``C2`` (aerodynamic + jet), undamped
+        natural frequency ``omega_n`` and damping ratio ``zeta``.
+
+        ``lift_slope`` is the rocket's total normal-force-curve slope for the
+        plane (``total_lift_coeff_der`` for pitch, ``total_side_coeff_der`` for
+        yaw); ``stability_margin`` is the matching linear margin
+        ``Function(mach, time)``; ``lateral_inertia`` is the array from
+        :meth:`_lateral_inertia`.
+        """
+        area = self.rocket.area
+        diameter = 2 * self.rocket.radius
+        csys = self.rocket._csys
+        nozzle_position = self.rocket.nozzle_position
+        mass_flow_rate = self.rocket.motor.total_mass_flow_rate
+
+        corrective = np.empty(len(self.time))
+        damping = np.empty(len(self.time))
+        for i, t in enumerate(self.time):
+            mach = self.mach_number.get_value_opt(t)
+            dynamic_pressure = self.dynamic_pressure.get_value_opt(t)
+            speed = self.speed.get_value_opt(t)
+            density = self.density.get_value_opt(t)
+            center_of_mass = self.rocket.center_of_mass.get_value_opt(t)
+
+            # Corrective moment per radian: q A C_Nalpha (x_cm - x_ac).
+            margin = stability_margin.get_value_opt(mach, t)  # calibers
+            corrective[i] = (
+                dynamic_pressure
+                * area
+                * lift_slope.get_value_opt(mach)
+                * margin
+                * diameter
+            )
+
+            # Aerodynamic damping: 0.5 rho V A sum_i (A_i/A) C_Nalpha_i arm_i^2.
+            damping_aero = 0.0
+            for surface, position in self.rocket.aerodynamic_surfaces:
+                slope = surface.lift_coefficient_derivative.get_value_opt(mach)
+                cp_position = (
+                    position.z
+                    - csys * surface.center_of_pressure_z.get_value_opt(mach)
+                )
+                arm = cp_position - center_of_mass
+                ref_factor = surface.reference_area / area
+                damping_aero += ref_factor * slope * arm**2
+            damping_aero *= 0.5 * density * speed * area
+
+            # Jet (propulsive) damping: mdot (x_nozzle - x_cm)^2.
+            damping_jet = abs(mass_flow_rate.get_value_opt(t)) * (
+                nozzle_position - center_of_mass
+            ) ** 2
+            damping[i] = damping_aero + damping_jet
+
+        positive_corrective = np.clip(corrective, 0.0, None)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            natural_frequency = np.sqrt(positive_corrective / lateral_inertia)
+            denominator = 2.0 * np.sqrt(positive_corrective * lateral_inertia)
+            damping_ratio = np.divide(
+                damping,
+                denominator,
+                out=np.zeros_like(damping),
+                where=denominator > 0,
+            )
+        return corrective, damping, natural_frequency, damping_ratio
+
+    @funcify_method("Time (s)", "Corrective Moment Coefficient (N m/rad)", "linear")
+    def corrective_moment_coefficient(self):
+        """Pitch-plane corrective (restoring) moment coefficient ``C1`` as a
+        function of time -- the aerodynamic restoring moment per radian of angle
+        of attack. Positive for a statically stable rocket."""
+        inertia = self._lateral_inertia(self.rocket.dry_I_11, self.rocket.motor.I_11)
+        corrective, _, _, _ = self._dynamic_stability(
+            self.rocket.total_lift_coeff_der, self.rocket.stability_margin, inertia
+        )
+        return np.column_stack((self.time, corrective))
+
+    @funcify_method("Time (s)", "Damping Moment Coefficient (N m s/rad)", "linear")
+    def damping_moment_coefficient(self):
+        """Pitch-plane damping moment coefficient ``C2`` as a function of time --
+        the moment opposing the pitch rate, summing aerodynamic damping (from
+        every surface) and propulsive (jet) damping."""
+        inertia = self._lateral_inertia(self.rocket.dry_I_11, self.rocket.motor.I_11)
+        _, damping, _, _ = self._dynamic_stability(
+            self.rocket.total_lift_coeff_der, self.rocket.stability_margin, inertia
+        )
+        return np.column_stack((self.time, damping))
+
+    @funcify_method("Time (s)", "Pitch Natural Frequency (rad/s)", "linear")
+    def pitch_natural_frequency(self):
+        """Undamped natural frequency of the pitch oscillation,
+        ``omega_n = sqrt(C1 / I_L)``, as a function of time (rad/s)."""
+        inertia = self._lateral_inertia(self.rocket.dry_I_11, self.rocket.motor.I_11)
+        _, _, natural_frequency, _ = self._dynamic_stability(
+            self.rocket.total_lift_coeff_der, self.rocket.stability_margin, inertia
+        )
+        return np.column_stack((self.time, natural_frequency))
+
+    @funcify_method("Time (s)", "Pitch Damping Ratio", "linear")
+    def pitch_damping_ratio(self):
+        """Damping ratio of the pitch oscillation,
+        ``zeta = C2 / (2 sqrt(C1 I_L))``, as a function of time. ``zeta < 1`` is
+        underdamped (oscillatory), ``zeta > 1`` overdamped."""
+        inertia = self._lateral_inertia(self.rocket.dry_I_11, self.rocket.motor.I_11)
+        _, _, _, damping_ratio = self._dynamic_stability(
+            self.rocket.total_lift_coeff_der, self.rocket.stability_margin, inertia
+        )
+        return np.column_stack((self.time, damping_ratio))
+
+    @funcify_method("Time (s)", "Yaw Natural Frequency (rad/s)", "linear")
+    def yaw_natural_frequency(self):
+        """Undamped natural frequency of the yaw oscillation as a function of
+        time (rad/s). Equals :meth:`pitch_natural_frequency` for an axisymmetric
+        rocket."""
+        inertia = self._lateral_inertia(self.rocket.dry_I_22, self.rocket.motor.I_22)
+        _, _, natural_frequency, _ = self._dynamic_stability(
+            self.rocket.total_side_coeff_der,
+            self.rocket.stability_margin_yaw,
+            inertia,
+        )
+        return np.column_stack((self.time, natural_frequency))
+
+    @funcify_method("Time (s)", "Yaw Damping Ratio", "linear")
+    def yaw_damping_ratio(self):
+        """Damping ratio of the yaw oscillation as a function of time. Equals
+        :meth:`pitch_damping_ratio` for an axisymmetric rocket."""
+        inertia = self._lateral_inertia(self.rocket.dry_I_22, self.rocket.motor.I_22)
+        _, _, _, damping_ratio = self._dynamic_stability(
+            self.rocket.total_side_coeff_der,
+            self.rocket.stability_margin_yaw,
+            inertia,
+        )
+        return np.column_stack((self.time, damping_ratio))
 
     # Rail Button Forces
 

@@ -171,6 +171,29 @@ class LinearGenericSurface(GenericSurface):
         self.prints = _LinearGenericSurfacePrints(self)
         self.plots = _LinearGenericSurfacePlots(self)
 
+    def _evaluate_derived_coefficients(self):
+        """Exact override of the diagnostic cp accessors. The linear model
+        already exposes the forcing derivatives ``cL_alpha``/``cm_alpha`` (pitch)
+        and ``cQ_beta``/``cn_beta`` (yaw), so the slopes are read directly
+        (frozen at zero alpha/beta/rates) instead of being recovered by
+        numerical differentiation. Damping derivatives (``_p/_q/_r``) are
+        intentionally excluded from the stability cp.
+        """
+
+        def _at_zero(coefficient, name):
+            return Function(
+                lambda mach: coefficient(0.0, 0.0, mach, 0.0, 0.0, 0.0, 0.0),
+                "Mach",
+                name,
+            )
+
+        self._set_derived_cp_accessors(
+            _at_zero(self.cL_alpha, "cL_alpha"),
+            _at_zero(self.cm_alpha, "cm_alpha"),
+            _at_zero(self.cQ_beta, "cQ_beta"),
+            _at_zero(self.cn_beta, "cn_beta"),
+        )
+
     def _get_default_coefficients(self):
         """Returns default coefficients
 
@@ -220,64 +243,119 @@ class LinearGenericSurface(GenericSurface):
         }
         return default_coefficients
 
+    _COEFFICIENT_INPUTS = [
+        "alpha",
+        "beta",
+        "mach",
+        "reynolds",
+        "pitch_rate",
+        "yaw_rate",
+        "roll_rate",
+    ]
+
     def compute_forcing_coefficient(self, c_0, c_alpha, c_beta):
-        """Compute the forcing coefficient from the derivatives of the
-        aerodynamic coefficients."""
+        """Compose the forcing coefficient ``c_0 + c_alpha*alpha + c_beta*beta``,
+        evaluating only the non-zero terms.
 
-        def total_coefficient(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        ):
-            return (
-                c_0(alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
-                + c_alpha(alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
-                * alpha
-                + c_beta(alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
-                * beta
-            )
+        Two hot-loop optimizations: ``get_value_opt`` is the unvalidated fast
+        evaluator (for callable-source coefficients it is the raw source), and
+        terms that are identically zero are skipped entirely. For a Barrowman
+        surface each forcing coefficient has at most one non-zero derivative, so
+        this typically collapses to a single source call (or to a constant 0).
+        """
+        has_0 = not getattr(c_0, "is_zero_coefficient", False)
+        has_alpha = not getattr(c_alpha, "is_zero_coefficient", False)
+        has_beta = not getattr(c_beta, "is_zero_coefficient", False)
+        c_0_opt = c_0.get_value_opt
+        c_alpha_opt = c_alpha.get_value_opt
+        c_beta_opt = c_beta.get_value_opt
 
-        return Function(
-            total_coefficient,
-            [
-                "alpha",
-                "beta",
-                "mach",
-                "reynolds",
-                "pitch_rate",
-                "yaw_rate",
-                "roll_rate",
-            ],
-            ["coefficient"],
-        )
+        if not (has_0 or has_alpha or has_beta):
+
+            def total_coefficient(  # pylint: disable=unused-argument
+                alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
+            ):
+                return 0.0
+
+        else:
+
+            def total_coefficient(
+                alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
+            ):
+                value = 0.0
+                if has_0:
+                    value += c_0_opt(
+                        alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
+                    )
+                if has_alpha:
+                    value += (
+                        c_alpha_opt(
+                            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
+                        )
+                        * alpha
+                    )
+                if has_beta:
+                    value += (
+                        c_beta_opt(
+                            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
+                        )
+                        * beta
+                    )
+                return value
+
+        return Function(total_coefficient, self._COEFFICIENT_INPUTS, ["coefficient"])
 
     def compute_damping_coefficient(self, c_p, c_q, c_r):
-        """Compute the damping coefficient from the derivatives of the
-        aerodynamic coefficients."""
+        """Compose the damping coefficient
+        ``c_p*roll_rate + c_q*pitch_rate + c_r*yaw_rate``, evaluating only the
+        non-zero terms (see :meth:`compute_forcing_coefficient`). For a Barrowman
+        surface only ``cl_p`` (roll damping) is non-zero, so most damping
+        coefficients collapse to a constant 0.
+        """
+        has_p = not getattr(c_p, "is_zero_coefficient", False)
+        has_q = not getattr(c_q, "is_zero_coefficient", False)
+        has_r = not getattr(c_r, "is_zero_coefficient", False)
+        c_p_opt = c_p.get_value_opt
+        c_q_opt = c_q.get_value_opt
+        c_r_opt = c_r.get_value_opt
 
-        def total_coefficient(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        ):
-            return (
-                c_p(alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
-                * roll_rate
-                + c_q(alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
-                * pitch_rate
-                + c_r(alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
-                * yaw_rate
-            )
+        if not (has_p or has_q or has_r):
 
-        return Function(
-            total_coefficient,
-            [
-                "alpha",
-                "beta",
-                "mach",
-                "reynolds",
-                "pitch_rate",
-                "yaw_rate",
-                "roll_rate",
-            ],
-            ["coefficient"],
-        )
+            def total_coefficient(  # pylint: disable=unused-argument
+                alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
+            ):
+                return 0.0
+
+        else:
+
+            def total_coefficient(
+                alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
+            ):
+                value = 0.0
+                if has_p:
+                    value += (
+                        c_p_opt(
+                            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
+                        )
+                        * roll_rate
+                    )
+                if has_q:
+                    value += (
+                        c_q_opt(
+                            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
+                        )
+                        * pitch_rate
+                    )
+                if has_r:
+                    value += (
+                        c_r_opt(
+                            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
+                        )
+                        * yaw_rate
+                    )
+                return value
+
+        return Function(total_coefficient, self._COEFFICIENT_INPUTS, ["coefficient"])
 
     def compute_all_coefficients(self):
         """Compute all the aerodynamic coefficients from the derivatives."""
@@ -312,6 +390,29 @@ class LinearGenericSurface(GenericSurface):
         )
         self.cld = self.compute_damping_coefficient(self.cl_p, self.cl_q, self.cl_r)
 
+        self._expose_uniform_coefficients()
+
+    def _expose_uniform_coefficients(self):
+        """Expose the main force/moment coefficients (``cL, cQ, cD, cm, cn``) as
+        the composed *forcing* coefficients, so every surface - including
+        Barrowman ones whose coefficients are derived from geometry - has
+        uniform, callable accessors over the standard argument tuple.
+
+        The forcing coefficient is the static, flow-state part of the model
+        (``c_0 + c_alpha*alpha + c_beta*beta``); the rate-damping parts
+        (``cLd``, …) are dimensionally tied to the reduced rate and remain
+        separate. The roll coefficient is intentionally **not** exposed as
+        ``cl`` here: geometry-defined subclasses (nose cones, tails, individual
+        fins) use the legacy ``cl`` name for their *lift* coefficient. The
+        composed roll forcing/damping remain available as ``clf``/``cld``.
+        """
+        # pylint: disable=invalid-name
+        self.cL = self.cLf
+        self.cQ = self.cQf
+        self.cD = self.cDf
+        self.cm = self.cmf
+        self.cn = self.cnf
+
     def _compute_from_coefficients(
         self,
         rho,
@@ -323,9 +424,14 @@ class LinearGenericSurface(GenericSurface):
         pitch_rate,
         yaw_rate,
         roll_rate,
+        alpha_dot=0.0,  # pylint: disable=unused-argument
+        beta_dot=0.0,  # pylint: disable=unused-argument
     ):
         """Compute the aerodynamic forces and moments from the aerodynamic
         coefficients.
+
+        The linear (Barrowman) model does not use the unsteady ``alpha_dot`` /
+        ``beta_dot`` terms; they are accepted for signature compatibility.
 
         Parameters
         ----------
@@ -369,42 +475,36 @@ class LinearGenericSurface(GenericSurface):
             / 2
         )
 
+        # Evaluate the composed coefficients through the fast, unvalidated
+        # ``get_value_opt`` path (the composed coefficients are callable-source
+        # Functions, so this calls the closure directly, skipping the per-call
+        # ``__call__``/``get_value`` argument validation in the hot loop).
+        args = (alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
+
         # Compute aerodynamic forces
-        lift = dyn_pressure_area * self.cLf(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        ) + dyn_pressure_area_damping * self.cLd(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
+        lift = dyn_pressure_area * self.cLf.get_value_opt(
+            *args
+        ) + dyn_pressure_area_damping * self.cLd.get_value_opt(*args)
 
-        side = dyn_pressure_area * self.cQf(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        ) + dyn_pressure_area_damping * self.cQd(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
+        side = dyn_pressure_area * self.cQf.get_value_opt(
+            *args
+        ) + dyn_pressure_area_damping * self.cQd.get_value_opt(*args)
 
-        drag = dyn_pressure_area * self.cDf(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        ) + dyn_pressure_area_damping * self.cDd(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
+        drag = dyn_pressure_area * self.cDf.get_value_opt(
+            *args
+        ) + dyn_pressure_area_damping * self.cDd.get_value_opt(*args)
 
         # Compute aerodynamic moments
-        pitch = dyn_pressure_area_length * self.cmf(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        ) + dyn_pressure_area_length_damping * self.cmd(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
+        pitch = dyn_pressure_area_length * self.cmf.get_value_opt(
+            *args
+        ) + dyn_pressure_area_length_damping * self.cmd.get_value_opt(*args)
 
-        yaw = dyn_pressure_area_length * self.cnf(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        ) + dyn_pressure_area_length_damping * self.cnd(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
+        yaw = dyn_pressure_area_length * self.cnf.get_value_opt(
+            *args
+        ) + dyn_pressure_area_length_damping * self.cnd.get_value_opt(*args)
 
-        roll = dyn_pressure_area_length * self.clf(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        ) + dyn_pressure_area_length_damping * self.cld(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
+        roll = dyn_pressure_area_length * self.clf.get_value_opt(
+            *args
+        ) + dyn_pressure_area_length_damping * self.cld.get_value_opt(*args)
 
         return lift, side, drag, pitch, yaw, roll

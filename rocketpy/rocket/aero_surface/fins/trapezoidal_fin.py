@@ -163,7 +163,6 @@ class TrapezoidalFin(Fin):
         )
         self._update_geometry_chain()
         self.evaluate_shape()
-        self.evaluate_rotation_matrix()
 
         self.prints = _TrapezoidalFinPrints(self)
         self.plots = _TrapezoidalFinPlots(self)

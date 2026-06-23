@@ -1,10 +1,51 @@
 from abc import ABC, abstractmethod
 
+import numpy as np
+
 
 # TODO: the rocketpy/prints/aero_surface_prints.py file could be separated into different, smaller files.
 class _AeroSurfacePrints(ABC):
     def __init__(self, aero_surface):
         self.aero_surface = aero_surface
+
+    def coefficients(self):
+        """Prints a summary of the surface's main aerodynamic coefficients.
+
+        For every non-zero coefficient (``cL, cQ, cD, cm, cn``) reports its
+        value at a reference condition (5° angle of attack and sideslip, Mach
+        0.3) and, when available, the variables it depends on. Works across all
+        surface types that expose the uniform coefficient accessors.
+        """
+        surface = self.aero_surface
+        independent_vars = getattr(surface, "independent_vars", None)
+        if independent_vars is None:
+            return
+        index = {name: i for i, name in enumerate(independent_vars)}
+        if "mach" not in index:
+            return
+        n_args = len(independent_vars)
+
+        print("Aerodynamic coefficients (AoA 5°, sideslip 5°, Mach 0.3):")
+        print("---------------------------------------------------------")
+        args = [0.0] * n_args
+        args[index["mach"]] = 0.3
+        if "alpha" in index:
+            args[index["alpha"]] = np.deg2rad(5)
+        if "beta" in index:
+            args[index["beta"]] = np.deg2rad(5)
+        printed = False
+        for name in ("cL", "cQ", "cD", "cm", "cn"):
+            coeff = getattr(surface, name, None)
+            if coeff is None or getattr(coeff, "is_zero", False):
+                continue
+            value = coeff(*args)
+            depends = getattr(coeff, "depends_on", None)
+            suffix = f" [depends on {', '.join(depends)}]" if depends else ""
+            print(f"  {name} = {value:.4f}{suffix}")
+            printed = True
+        if not printed:
+            print("  (all zero)")
+        print()
 
     def identity(self):
         """Prints the identity of the aero surface.
@@ -51,6 +92,7 @@ class _AeroSurfacePrints(ABC):
         self.identity()
         self.geometry()
         self.lift()
+        self.coefficients()
 
 
 class _NoseConePrints(_AeroSurfacePrints):
@@ -343,8 +385,8 @@ class _GenericSurfacePrints(_AeroSurfacePrints):
     def geometry(self):
         print("Geometric information of the Surface:")
         print("----------------------------------")
-        print(f"Reference Area: {self.generic_surface.reference_area:.3f} m")
-        print(f"Reference length: {2 * self.generic_surface.rocket_radius:.3f} m")
+        print(f"Reference Area: {self.aero_surface.reference_area:.3f} m^2")
+        print(f"Reference length: {self.aero_surface.reference_length:.3f} m\n")
 
     def all(self):
         """Prints all information of the generic surface.
@@ -355,7 +397,7 @@ class _GenericSurfacePrints(_AeroSurfacePrints):
         """
         self.identity()
         self.geometry()
-        self.lift()
+        self.coefficients()
 
 
 class _LinearGenericSurfacePrints(_AeroSurfacePrints):
@@ -364,8 +406,8 @@ class _LinearGenericSurfacePrints(_AeroSurfacePrints):
     def geometry(self):
         print("Geometric information of the Surface:")
         print("----------------------------------")
-        print(f"Reference Area: {self.generic_surface.reference_area:.3f} m")
-        print(f"Reference length: {2 * self.generic_surface.rocket_radius:.3f} m")
+        print(f"Reference Area: {self.aero_surface.reference_area:.3f} m^2")
+        print(f"Reference length: {self.aero_surface.reference_length:.3f} m\n")
 
     def all(self):
         """Prints all information of the linear generic surface.
@@ -376,4 +418,4 @@ class _LinearGenericSurfacePrints(_AeroSurfacePrints):
         """
         self.identity()
         self.geometry()
-        self.lift()
+        self.coefficients()

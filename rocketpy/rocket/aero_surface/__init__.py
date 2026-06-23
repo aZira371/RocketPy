@@ -10,6 +10,9 @@ from rocketpy.rocket.aero_surface.fins import (
     TrapezoidalFin,
     TrapezoidalFins,
 )
+from rocketpy.rocket.aero_surface.controllable_generic_surface import (
+    ControllableGenericSurface,
+)
 from rocketpy.rocket.aero_surface.generic_surface import GenericSurface
 from rocketpy.rocket.aero_surface.linear_generic_surface import LinearGenericSurface
 from rocketpy.rocket.aero_surface.nose_cone import NoseCone

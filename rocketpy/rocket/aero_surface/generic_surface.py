@@ -6,6 +6,20 @@ import numpy as np
 
 from rocketpy.mathutils import Function
 from rocketpy.mathutils.vector_matrix import Matrix, Vector
+from rocketpy.rocket.aero_surface.aero_coefficient import AeroCoefficient
+
+# Single source of truth for the coefficient independent variables. Subclasses
+# (e.g. ControllableGenericSurface, or the alpha_dot/beta_dot extension) append
+# extra axes to this base via ``self.independent_vars``.
+BASE_INDEPENDENT_VARS = [
+    "alpha",
+    "beta",
+    "mach",
+    "reynolds",
+    "pitch_rate",
+    "yaw_rate",
+    "roll_rate",
+]
 
 
 class GenericSurface:
@@ -21,6 +35,7 @@ class GenericSurface:
         coefficients,
         center_of_pressure=(0, 0, 0),
         name="Generic Surface",
+        unsteady_aero=False,
     ):
         """Create a generic aerodynamic surface, defined by its aerodynamic
         coefficients. This surface is used to model any aerodynamic surface
@@ -74,7 +89,26 @@ class GenericSurface:
             aerodynamic surface. The default value is (0, 0, 0).
         name : str, optional
             Name of the aerodynamic surface. Default is 'GenericSurface'.
+        unsteady_aero : bool, optional
+            If True, the coefficients additionally depend on the time
+            derivatives of the flow angles, and ``alpha_dot`` and ``beta_dot``
+            are appended (in that order) to the independent variables. CSV files
+            may then include "alpha_dot"/"beta_dot" columns, and callables must
+            accept the two extra trailing arguments. The simulation supplies 0
+            for these unless it computes them, so existing coefficient tables are
+            unaffected. Default is False.
         """
+
+        # Independent variables the coefficients depend on. Subclasses may set
+        # this (with extra axes appended) before calling ``super().__init__``.
+        # When ``unsteady_aero`` is enabled, the time-derivatives of the flow
+        # angles (``alpha_dot``, ``beta_dot``) are appended as extra axes
+        # (defaulting to 0 at runtime, so existing tables are unaffected).
+        self._unsteady_aero = unsteady_aero
+        if not hasattr(self, "independent_vars"):
+            self.independent_vars = list(BASE_INDEPENDENT_VARS)
+            if unsteady_aero:
+                self.independent_vars += ["alpha_dot", "beta_dot"]
 
         self.reference_area = reference_area
         self.reference_length = reference_length
@@ -93,6 +127,144 @@ class GenericSurface:
         for coeff, coeff_value in coefficients.items():
             value = self._process_input(coeff_value, coeff)
             setattr(self, coeff, value)
+
+        self.evaluate_coefficients()
+        self._evaluate_derived_coefficients()
+
+    @property
+    def force_application_point(self):
+        """Local point (surface frame) at which the resultant force is applied
+        when transporting its moment to the rocket's center of dry mass. For a
+        plain generic surface this is simply the center of pressure ``self.cp``;
+        the residual couple is carried by the ``cm``/``cn``/``cl`` coefficients.
+        Barrowman subclasses override this to the origin, because they fold the
+        whole cp offset into the moment coefficients instead.
+        """
+        return Vector([self.cpx, self.cpy, self.cpz])
+
+    def evaluate_coefficients(self):
+        """Hook for subclasses to (re)populate the aerodynamic coefficient
+        ``Function``s from their geometry. The base class builds coefficients
+        directly from the user-provided dictionary, so this is a no-op here.
+        Subclasses that derive coefficients from geometry (e.g. the Barrowman
+        surfaces) override this and call it again whenever their geometry
+        changes.
+
+        Returns
+        -------
+        None
+        """
+
+    def _evaluate_derived_coefficients(self):
+        """Build the mach-only diagnostic accessors used by the rocket's
+        center-of-pressure / stability-margin computation, for both the pitch
+        and the yaw plane.
+
+        These reconstruct, at the linearization point ``alpha = beta = 0`` with
+        zero rates, each plane's force-curve slope and the location of its
+        center of pressure. The center of pressure combines the surface's
+        declared local ``cpz`` with the offset implied by its moment
+        coefficient (the two representations are interchangeable;
+        ``cpz_eff = cpz - (dc_moment/dangle)/(dc_force/dangle) * L_ref``):
+
+        - pitch plane: ``lift_coefficient_derivative`` (``dcL/dalpha``) and
+          ``center_of_pressure_z`` (from ``cm``);
+        - yaw plane: ``side_coefficient_derivative`` and
+          ``center_of_pressure_z_yaw`` (from ``cn``).
+
+        Returns
+        -------
+        None
+        """
+        cL_alpha = self._partial_slope(self.cL, axis="alpha")
+        cm_alpha = self._partial_slope(self.cm, axis="alpha")
+        cQ_beta = self._partial_slope(self.cQ, axis="beta")
+        cn_beta = self._partial_slope(self.cn, axis="beta")
+        self._set_derived_cp_accessors(cL_alpha, cm_alpha, cQ_beta, cn_beta)
+
+    def _set_derived_cp_accessors(self, cL_alpha, cm_alpha, cQ_beta, cn_beta):
+        """Store the pitch- and yaw-plane diagnostic accessors as mach-only
+        ``Function``s, guarding the moment/force division for zero-force
+        surfaces (which then drop out of the force-weighted cp average).
+
+        Parameters
+        ----------
+        cL_alpha : Function
+            Pitch-plane normal-force slope ``dcL/dalpha`` vs. mach.
+        cm_alpha : Function
+            Pitch-moment slope ``dcm/dalpha`` vs. mach.
+        cQ_beta : Function
+            Yaw-plane side-force slope ``dcQ/dbeta`` vs. mach.
+        cn_beta : Function
+            Yaw-moment slope ``dcn/dbeta`` vs. mach.
+        """
+        reference_length = self.reference_length
+        local_cpz = self.force_application_point[2]
+
+        def _cp_z(force_slope, moment_slope):
+            def cp_z(mach):
+                slope = force_slope.get_value_opt(mach)
+                if slope == 0:
+                    return local_cpz
+                return (
+                    local_cpz
+                    - moment_slope.get_value_opt(mach) / slope * reference_length
+                )
+
+            return Function(cp_z, "Mach", "Center of pressure to local origin (m)")
+
+        # Pitch plane.
+        self.lift_coefficient_derivative = cL_alpha
+        self.center_of_pressure_z = _cp_z(cL_alpha, cm_alpha)
+
+        # Yaw plane. The side-force slope is sign-adjusted (``-cQ_beta``) so that
+        # an axisymmetric surface yields the same signed weight as the pitch
+        # plane, making the two planes' margins coincide when symmetric.
+        self.side_coefficient_derivative = -cQ_beta
+        self.center_of_pressure_z_yaw = _cp_z(cQ_beta, cn_beta)
+
+    def _partial_slope(self, coefficient, axis):
+        """Partial derivative ``d(coefficient)/d(axis)`` at ``alpha = beta = 0``
+        and zero rates, returned as a mach-only ``Function``.
+
+        Reuses :meth:`Function.differentiate` on a single-variable slice of the
+        coefficient taken along ``axis`` (``"alpha"`` or ``"beta"``) with all
+        other base inputs frozen at zero. Extra axes (control deflections) are
+        frozen at their current value via :meth:`_coefficient_arguments`.
+
+        Parameters
+        ----------
+        coefficient : Function
+            A coefficient ``Function`` over ``self.independent_vars``.
+        axis : str
+            Either ``"alpha"`` or ``"beta"``.
+
+        Returns
+        -------
+        Function
+            ``d(coefficient)/d(axis)`` evaluated at the zero point, vs. mach.
+        """
+
+        def slope(mach):
+            if axis == "alpha":
+                sliced = Function(
+                    lambda alpha: coefficient(
+                        *self._coefficient_arguments(
+                            alpha, 0.0, mach, 0.0, 0.0, 0.0, 0.0
+                        )
+                    )
+                )
+            else:
+                sliced = Function(
+                    lambda beta: coefficient(
+                        *self._coefficient_arguments(
+                            0.0, beta, mach, 0.0, 0.0, 0.0, 0.0
+                        )
+                    )
+                )
+            return sliced.differentiate(0)
+
+        return Function(slope, "Mach", "Coefficient derivative")
 
     def _get_default_coefficients(self):
         """Returns default coefficients
@@ -173,6 +345,8 @@ class GenericSurface:
         pitch_rate,
         yaw_rate,
         roll_rate,
+        alpha_dot=0.0,
+        beta_dot=0.0,
     ):
         """Compute the aerodynamic forces and moments from the aerodynamic
         coefficients.
@@ -208,29 +382,55 @@ class GenericSurface:
         dyn_pressure_area = 0.5 * rho * stream_speed**2 * self.reference_area
         dyn_pressure_area_length = dyn_pressure_area * self.reference_length
 
+        # Coefficient arguments (base 7 vars, plus any extra axes appended by
+        # subclasses such as control deflections or the unsteady alpha_dot/
+        # beta_dot terms).
+        args = self._coefficient_arguments(
+            alpha,
+            beta,
+            mach,
+            reynolds,
+            pitch_rate,
+            yaw_rate,
+            roll_rate,
+            alpha_dot,
+            beta_dot,
+        )
+
         # Compute aerodynamic forces
-        lift = dyn_pressure_area * self.cL(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
-        side = dyn_pressure_area * self.cQ(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
-        drag = dyn_pressure_area * self.cD(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
+        lift = dyn_pressure_area * self.cL(*args)
+        side = dyn_pressure_area * self.cQ(*args)
+        drag = dyn_pressure_area * self.cD(*args)
 
         # Compute aerodynamic moments
-        pitch = dyn_pressure_area_length * self.cm(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
-        yaw = dyn_pressure_area_length * self.cn(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
-        roll = dyn_pressure_area_length * self.cl(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate
-        )
+        pitch = dyn_pressure_area_length * self.cm(*args)
+        yaw = dyn_pressure_area_length * self.cn(*args)
+        roll = dyn_pressure_area_length * self.cl(*args)
 
         return lift, side, drag, pitch, yaw, roll
+
+    def _coefficient_arguments(
+        self,
+        alpha,
+        beta,
+        mach,
+        reynolds,
+        pitch_rate,
+        yaw_rate,
+        roll_rate,
+        alpha_dot=0.0,
+        beta_dot=0.0,
+    ):
+        """Returns the argument tuple passed to every coefficient ``Function``,
+        in ``self.independent_vars`` order. The base class provides the seven
+        standard inputs, plus ``alpha_dot``/``beta_dot`` when ``unsteady_aero``
+        is enabled. Subclasses (e.g. :class:`ControllableGenericSurface`)
+        override this to append further axes such as control deflections.
+        """
+        base = (alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
+        if self._unsteady_aero:
+            return base + (alpha_dot, beta_dot)
+        return base
 
     def compute_forces_and_moments(
         self,
@@ -243,6 +443,8 @@ class GenericSurface:
         density,
         dynamic_viscosity,
         z,
+        alpha_dot=0.0,
+        beta_dot=0.0,
     ):
         """Computes the forces and moments acting on the aerodynamic surface.
         Used in each time step of the simulation.  This method is valid for
@@ -306,20 +508,29 @@ class GenericSurface:
             omega[0],  # q
             omega[1],  # r
             omega[2],  # p
+            alpha_dot,
+            beta_dot,
         )
 
-        # Conversion from aerodynamic frame to body frame
+        # Conversion from the aerodynamic frame to the body frame. This is the
+        # direction cosine matrix (DCM) that expresses the aerodynamic-frame
+        # force components in the body frame, i.e. rotations by ``-alpha`` about
+        # x and ``+beta`` about y. Using the opposite-sign "vector rotation"
+        # matrices is incorrect: it leaves the result effectively in the
+        # aerodynamic frame, flipping the transverse components of any force that
+        # has a drag part (see RocketPy issue #932). Surfaces with no drag (the
+        # Barrowman lift/side surfaces) differ only in the small axial term.
         rotation_matrix = Matrix(
             [
                 [1, 0, 0],
-                [0, math.cos(alpha), -math.sin(alpha)],
-                [0, math.sin(alpha), math.cos(alpha)],
+                [0, math.cos(alpha), math.sin(alpha)],
+                [0, -math.sin(alpha), math.cos(alpha)],
             ]
         ) @ Matrix(
             [
-                [math.cos(beta), 0, -math.sin(beta)],
+                [math.cos(beta), 0, math.sin(beta)],
                 [0, 1, 0],
-                [math.sin(beta), 0, math.cos(beta)],
+                [-math.sin(beta), 0, math.cos(beta)],
             ]
         )
         R1, R2, R3 = rotation_matrix @ Vector([side, -lift, -drag])
@@ -330,91 +541,48 @@ class GenericSurface:
         return R1, R2, R3, M1, M2, M3
 
     def _process_input(self, input_data, coeff_name):
-        """Process the input data, either as a CSV file or a callable function.
+        """Process a coefficient input into an :class:`AeroCoefficient`.
+
+        Accepts a number, a callable, a :class:`Function`, or a path to a CSV
+        file, storing the coefficient at its intrinsic dimensionality (its
+        ``depends_on``) rather than forcing it into a full
+        ``len(self.independent_vars)``-D ``Function``. See
+        :class:`AeroCoefficient`.
 
         Parameters
         ----------
-        input_data : str or callable
-            Input data to be processed, either a path to a CSV or a callable.
+        input_data : int, float, str, callable, or Function
+            Input data to be processed.
         coeff_name : str
             Name of the coefficient being processed for error reporting.
 
         Returns
         -------
-        Function
-            Function object with 7 input arguments (alpha, beta, mach, reynolds,
-            pitch_rate, yaw_rate, roll_rate).
+        AeroCoefficient
+            Callable over the full ``self.independent_vars`` argument tuple.
         """
-        if isinstance(input_data, str):
-            # Input is assumed to be a file path to a CSV
-            return self.__load_generic_surface_csv(input_data, coeff_name)
-        elif isinstance(input_data, Function):
-            if input_data.__dom_dim__ != 7:
-                raise ValueError(
-                    f"{coeff_name} function must have 7 input arguments"
-                    " (alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)."
-                )
-            return input_data
-        elif callable(input_data):
-            # Check if callable has 7 inputs (alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
-            if input_data.__code__.co_argcount != 7:
-                raise ValueError(
-                    f"{coeff_name} function must have 7 input arguments"
-                    " (alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)."
-                )
-            return Function(
-                input_data,
-                [
-                    "alpha",
-                    "beta",
-                    "mach",
-                    "reynolds",
-                    "pitch_rate",
-                    "yaw_rate",
-                    "roll_rate",
-                ],
-                [coeff_name],
-                interpolation="linear",
-                extrapolation="natural",
-            )
-        elif input_data == 0:
-            return Function(
-                lambda alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate: 0,
-                [
-                    "alpha",
-                    "beta",
-                    "mach",
-                    "reynolds",
-                    "pitch_rate",
-                    "yaw_rate",
-                    "roll_rate",
-                ],
-                [coeff_name],
-                interpolation="linear",
-                extrapolation="natural",
-            )
-        else:
-            raise TypeError(
-                f"Invalid input for {coeff_name}: must be a CSV file path"
-                " or a callable."
-            )
+        return AeroCoefficient.from_input(
+            input_data,
+            coeff_name,
+            self.independent_vars,
+            csv_loader=self.__load_generic_surface_csv,
+        )
 
     def __load_generic_surface_csv(self, file_path, coeff_name):  # pylint: disable=too-many-statements,import-outside-toplevel
-        """Load GenericSurface coefficient CSV into a 7D Function.
+        """Load a GenericSurface coefficient CSV at minimal dimension.
 
         This loader expects header-based CSV data with one or more independent
-        variables among: alpha, beta, mach, reynolds, pitch_rate, yaw_rate,
-        roll_rate.
+        variables among ``self.independent_vars`` (the seven base variables,
+        plus any extra axes added by subclasses such as control deflections).
+
+        Returns
+        -------
+        tuple
+            ``(function, depends_on)`` where ``function`` is a low-dimensional
+            ``Function`` over the present columns and ``depends_on`` lists those
+            columns. Consumed by :meth:`AeroCoefficient.from_input`.
         """
-        independent_vars = [
-            "alpha",
-            "beta",
-            "mach",
-            "reynolds",
-            "pitch_rate",
-            "yaw_rate",
-            "roll_rate",
-        ]
+        independent_vars = list(self.independent_vars)
 
         try:
             with open(file_path, mode="r") as file:
@@ -464,23 +632,7 @@ class GenericSurface:
                 extrapolation="natural",
             )
 
-        def wrapper(alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate):
-            args_by_name = {
-                "alpha": alpha,
-                "beta": beta,
-                "mach": mach,
-                "reynolds": reynolds,
-                "pitch_rate": pitch_rate,
-                "yaw_rate": yaw_rate,
-                "roll_rate": roll_rate,
-            }
-            selected_args = [args_by_name[col] for col in ordered_present_columns]
-            return csv_func(*selected_args)
-
-        return Function(
-            wrapper,
-            independent_vars,
-            [coeff_name],
-            interpolation="linear",
-            extrapolation="natural",
-        )
+        # The CSV columns may appear in any order; AeroCoefficient maps the full
+        # argument tuple to ``ordered_present_columns`` order, so the stored
+        # Function is queried directly at its own (minimal) dimensionality.
+        return csv_func, ordered_present_columns
