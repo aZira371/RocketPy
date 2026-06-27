@@ -2377,20 +2377,26 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         diameter = 2 * self.rocket.radius
         time = self.time
 
-        alpha = np.array(
-            [self.partial_angle_of_attack.get_value_opt(t) for t in time]
-        )
-        beta = np.array([self.angle_of_sideslip.get_value_opt(t) for t in time])
+        # These are all tabulated at exactly ``self.time`` (their source is
+        # ``column_stack([self.time, values])`` or same-grid Function
+        # arithmetic), so read the values straight from ``.source`` instead of
+        # re-evaluating per node. ``mach`` is reused by both the realized cp and
+        # the linear margin below. ``center_of_mass`` is a rocket-level Function
+        # on a different grid, so it still needs ``get_value_opt(t)``.
+        alpha = self.partial_angle_of_attack.source[:, 1]
+        beta = self.angle_of_sideslip.source[:, 1]
+        mach = self.mach_number.source[:, 1]
+        reynolds = self.reynolds_number.source[:, 1]
 
         center_of_pressure = np.array(
             [
                 self.rocket.center_of_pressure(
                     np.deg2rad(a),
                     np.deg2rad(b),
-                    self.mach_number.get_value_opt(t),
-                    self.reynolds_number.get_value_opt(t),
+                    m,
+                    re,
                 )
-                for a, b, t in zip(alpha, beta, time)
+                for a, b, m, re in zip(alpha, beta, mach, reynolds)
             ]
         )
         center_of_mass = np.array(
@@ -2400,10 +2406,8 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
 
         margin_model = np.array(
             [
-                self.rocket.stability_margin.get_value_opt(
-                    self.mach_number.get_value_opt(t), t
-                )
-                for t in time
+                self.rocket.stability_margin.get_value_opt(m, t)
+                for m, t in zip(mach, time)
             ]
         )
 
@@ -2417,9 +2421,7 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
 
         # Fall back fully to the linear margin where the rocket is barely moving
         # (dynamic pressure below 1% of its flight-wide peak: rail, rest, apogee).
-        dynamic_pressure = np.array(
-            [self.dynamic_pressure.get_value_opt(t) for t in time]
-        )
+        dynamic_pressure = self.dynamic_pressure.source[:, 1]
         meaningful = dynamic_pressure > 0.01 * dynamic_pressure.max()
         margin = np.where(meaningful, margin_blended, margin_model)
 
@@ -2446,9 +2448,7 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
             total = propellant_mass + dry_mass
             mu = (propellant_mass * dry_mass / total) if total > 0 else 0.0
             inertia[i] = (
-                dry_lateral_inertia
-                + motor_lateral_inertia.get_value_opt(t)
-                + mu * b**2
+                dry_lateral_inertia + motor_lateral_inertia.get_value_opt(t) + mu * b**2
             )
         return inertia
 
@@ -2494,8 +2494,7 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
             for surface, position in self.rocket.aerodynamic_surfaces:
                 slope = surface.lift_coefficient_derivative.get_value_opt(mach)
                 cp_position = (
-                    position.z
-                    - csys * surface.center_of_pressure_z.get_value_opt(mach)
+                    position.z - csys * surface.center_of_pressure_z.get_value_opt(mach)
                 )
                 arm = cp_position - center_of_mass
                 ref_factor = surface.reference_area / area
@@ -2503,9 +2502,10 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
             damping_aero *= 0.5 * density * speed * area
 
             # Jet (propulsive) damping: mdot (x_nozzle - x_cm)^2.
-            damping_jet = abs(mass_flow_rate.get_value_opt(t)) * (
-                nozzle_position - center_of_mass
-            ) ** 2
+            damping_jet = (
+                abs(mass_flow_rate.get_value_opt(t))
+                * (nozzle_position - center_of_mass) ** 2
+            )
             damping[i] = damping_aero + damping_jet
 
         positive_corrective = np.clip(corrective, 0.0, None)

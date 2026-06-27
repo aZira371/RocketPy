@@ -1,6 +1,4 @@
 # pylint: disable=too-many-statements
-from abc import ABC, abstractmethod
-
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Ellipse
@@ -8,16 +6,16 @@ from matplotlib.patches import Ellipse
 from .plot_helpers import show_or_save_plot
 
 
-class _AeroSurfacePlots(ABC):
-    """Abstract class that contains all aero surface plots."""
+class _GenericSurfacePlots:
+    """Base plots for a generic aerodynamic surface."""
 
     def __init__(self, aero_surface):
         """Initialize the class
 
         Parameters
         ----------
-        aero_surface : rocketpy.AeroSurface
-            AeroSurface object to be plotted
+        aero_surface : rocketpy.GenericSurface
+            Aerodynamic surface object to be plotted
 
         Returns
         -------
@@ -25,20 +23,8 @@ class _AeroSurfacePlots(ABC):
         """
         self.aero_surface = aero_surface
 
-    @abstractmethod
     def draw(self, *, filename=None):
-        pass
-
-    def lift(self):
-        """Plots the lift coefficient of the aero surface as a function of Mach
-        and the angle of attack. A 3D plot is expected. See the rocketpy.Function
-        class for more information on how this plot is made.
-
-        Returns
-        -------
-        None
-        """
-        self.aero_surface.cl()
+        """A plain generic surface has no geometry to draw."""
 
     # Coefficients swept against their most relevant incidence angle: pitch-plane
     # coefficients vs. angle of attack, yaw-plane ones vs. sideslip.
@@ -115,20 +101,40 @@ class _AeroSurfacePlots(ABC):
         show_or_save_plot(filename)
 
     def all(self):
-        """Plots all aero surface plots.
+        """Plots the generic surface's aerodynamic coefficients."""
+        self.coefficients()
+
+
+class _LinearGenericSurfacePlots(_GenericSurfacePlots):
+    """Plots for a linear generic surface; same plots as the generic base."""
+
+
+class _BarrowmanSurfacePlots(_LinearGenericSurfacePlots):
+    """Plots shared by the geometry-defined (Barrowman) surfaces: adds the
+    geometry drawing and the lift-coefficient surface plot."""
+
+    def lift(self):
+        """Plots the lift coefficient of the aero surface as a function of Mach
+        and the angle of attack. A 3D plot is expected. See the rocketpy.Function
+        class for more information on how this plot is made.
 
         Returns
         -------
         None
         """
+        self.aero_surface.cl()
+
+    def all(self):
+        """Plots the surface geometry, the lift coefficient and the
+        aerodynamic coefficients."""
         self.draw()
         self.lift()
         self.coefficients()
 
 
-class _NoseConePlots(_AeroSurfacePlots):
+class _NoseConePlots(_BarrowmanSurfacePlots):
     """Class that contains all nosecone plots. This class inherits from the
-    _AeroSurfacePlots class."""
+    _BarrowmanSurfacePlots class."""
 
     def draw(self, *, filename=None):
         """Draw the nosecone shape along with some important information,
@@ -211,9 +217,9 @@ class _NoseConePlots(_AeroSurfacePlots):
         show_or_save_plot(filename)
 
 
-class _FinsPlots(_AeroSurfacePlots):
+class _FinsPlots(_BarrowmanSurfacePlots):
     """Abstract class that contains all fin plots. This class inherits from the
-    _AeroSurfacePlots class."""
+    _BarrowmanSurfacePlots class."""
 
     def airfoil(self, *, filename=None):
         """Plots the airfoil information when the fin has an airfoil shape. If
@@ -293,9 +299,9 @@ class _FinsPlots(_AeroSurfacePlots):
         self.coefficients(filename=filename)
 
 
-class _FinPlots(_AeroSurfacePlots):
+class _FinPlots(_BarrowmanSurfacePlots):
     """Abstract class that contains all fin plots. This class inherits from the
-    _AeroSurfacePlots class."""
+    _BarrowmanSurfacePlots class."""
 
     def airfoil(self, *, filename=None):
         """Plots the airfoil information when the fin has an airfoil shape. If
@@ -918,7 +924,7 @@ class _FreeFormFinPlots(_FinPlots):
         show_or_save_plot(filename)
 
 
-class _TailPlots(_AeroSurfacePlots):
+class _TailPlots(_BarrowmanSurfacePlots):
     """Class that contains all tail plots."""
 
     def draw(self, *, filename=None):
@@ -926,7 +932,7 @@ class _TailPlots(_AeroSurfacePlots):
         pass
 
 
-class _AirBrakesPlots(_AeroSurfacePlots):
+class _AirBrakesPlots(_GenericSurfacePlots):
     """Class that contains all air brakes plots."""
 
     def drag_coefficient_curve(self):
@@ -947,26 +953,3 @@ class _AirBrakesPlots(_AeroSurfacePlots):
         None
         """
         self.drag_coefficient_curve()
-
-
-class _GenericSurfacePlots(_AeroSurfacePlots):
-    """Class that contains all generic surface plots."""
-
-    def draw(self, *, filename=None):
-        pass
-
-    def all(self):
-        """Plots all generic surface plots (the aerodynamic coefficients)."""
-        self.coefficients()
-
-
-class _LinearGenericSurfacePlots(_AeroSurfacePlots):
-    """Class that contains all linear generic surface plots."""
-
-    def draw(self, *, filename=None):
-        pass
-
-    def all(self):
-        """Plots all linear generic surface plots (the aerodynamic
-        coefficients)."""
-        self.coefficients()

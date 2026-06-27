@@ -27,6 +27,10 @@ class RailButtons(GenericSurface):
         calculated but flight dynamics remain unaffected.
     """
 
+    # Rail buttons carry no aerodynamic force, so they contribute nothing to
+    # either plane: axisymmetric for the pitch/yaw check.
+    is_axisymmetric = True
+
     def __init__(
         self,
         buttons_distance,

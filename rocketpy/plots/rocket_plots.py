@@ -125,78 +125,6 @@ class _RocketPlots:
             alpha=1,
         )
 
-    def stability_margin_over_alpha(self, *, filename=None):
-        """Plots the stability margin in calibers as a function of angle of
-        attack, for a range of Mach numbers. Built on the nonlinear center of
-        pressure, it shows how the margin changes with incidence -- the
-        angle-of-attack analogue of the static margin, which a Barrowman
-        (Mach-only) estimate cannot capture. Evaluated at the loaded center of
-        mass (``time = 0``).
-
-        Parameters
-        ----------
-        filename : str | None, optional
-            The path the plot should be saved to. By default None, in which case
-            the plot will be shown instead of saved. Supported file endings are:
-            eps, jpg, jpeg, pdf, pgf, png, ps, raw, rgba, svg, svgz, tif, tiff
-            and webp (these are the formats supported by matplotlib).
-
-        Returns
-        -------
-        None
-        """
-        alphas_deg = np.linspace(0, 15, 50)
-        alphas_rad = np.radians(alphas_deg)
-
-        _, ax = plt.subplots()
-        for mach in (0.1, 0.5, 0.8, 1.2, 2.0):
-            margin = self.rocket.stability_margin_over_alpha(mach=mach)
-            margin_values = [margin.get_value_opt(a) for a in alphas_rad]
-            ax.plot(alphas_deg, margin_values, label=f"Mach {mach}")
-
-        ax.set_title("Stability Margin vs Angle of Attack (loaded)")
-        ax.set_xlabel("Angle of Attack (deg)")
-        ax.set_ylabel("Stability Margin (c)")
-        ax.legend(loc="best", shadow=True)
-        plt.grid(True)
-        show_or_save_plot(filename)
-
-    def stability_margin_over_beta(self, *, filename=None):
-        """Plots the stability margin in calibers as a function of sideslip
-        angle, for a range of Mach numbers -- the yaw-plane companion to
-        :meth:`stability_margin_over_alpha`. Most informative for
-        non-axisymmetric rockets, whose yaw-plane center of pressure differs
-        from the pitch-plane one. Evaluated at the loaded center of mass
-        (``time = 0``).
-
-        Parameters
-        ----------
-        filename : str | None, optional
-            The path the plot should be saved to. By default None, in which case
-            the plot will be shown instead of saved. Supported file endings are:
-            eps, jpg, jpeg, pdf, pgf, png, ps, raw, rgba, svg, svgz, tif, tiff
-            and webp (these are the formats supported by matplotlib).
-
-        Returns
-        -------
-        None
-        """
-        betas_deg = np.linspace(0, 15, 50)
-        betas_rad = np.radians(betas_deg)
-
-        _, ax = plt.subplots()
-        for mach in (0.1, 0.5, 0.8, 1.2, 2.0):
-            margin = self.rocket.stability_margin_over_beta(mach=mach)
-            margin_values = [margin.get_value_opt(b) for b in betas_rad]
-            ax.plot(betas_deg, margin_values, label=f"Mach {mach}")
-
-        ax.set_title("Stability Margin vs Sideslip Angle (loaded)")
-        ax.set_xlabel("Sideslip Angle (deg)")
-        ax.set_ylabel("Stability Margin (c)")
-        ax.legend(loc="best", shadow=True)
-        plt.grid(True)
-        show_or_save_plot(filename)
-
     # pylint: disable=too-many-statements
     def drag_curves(self, *, filename=None):
         """Plots power off and on drag curves of the rocket as a function of time.
@@ -275,8 +203,7 @@ class _RocketPlots:
         _, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
         for mach in (0.1, 0.5, 0.8, 1.2, 2.0):
             coeffs = [
-                self.rocket.aerodynamic_coefficients(a, 0.0, mach)
-                for a in alphas_rad
+                self.rocket.aerodynamic_coefficients(a, 0.0, mach) for a in alphas_rad
             ]
             ax1.plot(
                 alphas_deg, [c["normal_force"] for c in coeffs], label=f"Mach {mach}"
@@ -845,24 +772,24 @@ class _RocketPlots:
                 label="Center of Pressure Range",
             )
 
-        ax.scatter(
-            cp, 0, label="Center of Pressure", color="red", s=10, zorder=10
-        )
+        ax.scatter(cp, 0, label="Center of Pressure", color="red", s=10, zorder=10)
 
     def _center_of_pressure_range(self, plane, max_angle=np.deg2rad(15), samples=31):
         """Min and max center-of-pressure position over an incidence sweep.
 
         Sweeps the angle of attack (xz plane) or sideslip (yz plane) from 0 to
-        ``max_angle`` using :meth:`Rocket.center_of_pressure_over_alpha` /
-        :meth:`Rocket.center_of_pressure_over_beta` and returns the extent of
-        the resulting center-of-pressure travel.
+        ``max_angle`` using the nonlinear :meth:`Rocket.center_of_pressure` and
+        returns the extent of the resulting center-of-pressure travel.
         """
-        if plane == "yz":
-            cp_travel = self.rocket.center_of_pressure_over_beta()
-        else:
-            cp_travel = self.rocket.center_of_pressure_over_alpha()
         angles = np.linspace(0, max_angle, samples)
-        positions = np.array([cp_travel.get_value_opt(a) for a in angles])
+        if plane == "yz":
+            positions = np.array(
+                [self.rocket.center_of_pressure(0.0, b, 0.0) for b in angles]
+            )
+        else:
+            positions = np.array(
+                [self.rocket.center_of_pressure(a, 0.0, 0.0) for a in angles]
+            )
         positions = positions[np.isfinite(positions)]
         if len(positions) == 0:
             return (0.0, 0.0)
@@ -956,13 +883,11 @@ class _RocketPlots:
         print("-" * 20)  # Separator for Stability Plots
         self.static_margin()
         self.stability_margin()
-        self.stability_margin_over_alpha()
         # Non-axisymmetric rockets: the above describe the pitch plane only, so
-        # also show the yaw-plane margins (including the sideslip sweep).
+        # also show the yaw-plane margins.
         if not self.rocket.is_axisymmetric:
             self.static_margin_yaw()
             self.stability_margin_yaw()
-            self.stability_margin_over_beta()
 
         # Thrust-to-Weight Plot
         print("\nThrust-to-Weight Plot")

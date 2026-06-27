@@ -1366,15 +1366,20 @@ class _FlightPlots:
         if asymmetric:
             yaw_freq = self.flight.yaw_natural_frequency
             ax1.plot(
-                yaw_freq[:, 0], yaw_freq[:, 1] / (2 * np.pi), "--",
+                yaw_freq[:, 0],
+                yaw_freq[:, 1] / (2 * np.pi),
+                "--",
                 label="Yaw natural freq.",
             )
         # Roll rate as a frequency: where it crosses the natural frequency the
         # rocket is in roll resonance (roll-pitch/yaw coupling).
         roll_rate = self.flight.w3
         ax1.plot(
-            roll_rate[:, 0], np.abs(roll_rate[:, 1]) / (2 * np.pi), ":",
-            color="tab:red", label="Roll rate (resonance if crossing)",
+            roll_rate[:, 0],
+            np.abs(roll_rate[:, 1]) / (2 * np.pi),
+            ":",
+            color="tab:red",
+            label="Roll rate (resonance if crossing)",
         )
         ax1.set_title("Natural Frequency & Roll Rate")
         ax1.set_xlabel("Time (s)")

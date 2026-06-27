@@ -390,23 +390,6 @@ class LinearGenericSurface(GenericSurface):
         )
         self.cld = self.compute_damping_coefficient(self.cl_p, self.cl_q, self.cl_r)
 
-        self._expose_uniform_coefficients()
-
-    def _expose_uniform_coefficients(self):
-        """Expose the main force/moment coefficients (``cL, cQ, cD, cm, cn``) as
-        the composed *forcing* coefficients, so every surface - including
-        Barrowman ones whose coefficients are derived from geometry - has
-        uniform, callable accessors over the standard argument tuple.
-
-        The forcing coefficient is the static, flow-state part of the model
-        (``c_0 + c_alpha*alpha + c_beta*beta``); the rate-damping parts
-        (``cLd``, …) are dimensionally tied to the reduced rate and remain
-        separate. The roll coefficient is intentionally **not** exposed as
-        ``cl`` here: geometry-defined subclasses (nose cones, tails, individual
-        fins) use the legacy ``cl`` name for their *lift* coefficient. The
-        composed roll forcing/damping remain available as ``clf``/``cld``.
-        """
-        # pylint: disable=invalid-name
         self.cL = self.cLf
         self.cQ = self.cQf
         self.cD = self.cDf
@@ -448,11 +431,11 @@ class LinearGenericSurface(GenericSurface):
         reynolds : float
             Reynolds number.
         pitch_rate : float
-            Pitch rate in radians per second.
+            Non-dimensional (reduced) pitch rate, ``q * L_ref / (2 * V)``.
         yaw_rate : float
-            Yaw rate in radians per second.
+            Non-dimensional (reduced) yaw rate, ``r * L_ref / (2 * V)``.
         roll_rate : float
-            Roll rate in radians per second.
+            Non-dimensional (reduced) roll rate, ``p * L_ref / (2 * V)``.
 
         Returns
         -------
@@ -460,20 +443,14 @@ class LinearGenericSurface(GenericSurface):
             The aerodynamic forces (lift, side_force, drag) and moments
             (pitch, yaw, roll) in the body frame.
         """
-        # Precompute common values
+        # Precompute common values. The angular rates arrive already
+        # non-dimensionalized (reduced rates, e.g. ``q* = q * L_ref / (2 * V)``),
+        # so the rate-damping terms use the same dynamic-pressure scaling as the
+        # forcing terms: the ``L_ref / (2 * V)`` factor now lives in the rate
+        # itself, not in the scaling. (Algebraically identical to the previous
+        # ``0.5 * rho * V * A * L / 2`` damping scaling applied to raw rates.)
         dyn_pressure_area = 0.5 * rho * stream_speed**2 * self.reference_area
-        dyn_pressure_area_damping = (
-            0.5 * rho * stream_speed * self.reference_area * self.reference_length / 2
-        )
         dyn_pressure_area_length = dyn_pressure_area * self.reference_length
-        dyn_pressure_area_length_damping = (
-            0.5
-            * rho
-            * stream_speed
-            * self.reference_area
-            * self.reference_length**2
-            / 2
-        )
 
         # Evaluate the composed coefficients through the fast, unvalidated
         # ``get_value_opt`` path (the composed coefficients are callable-source
@@ -481,30 +458,26 @@ class LinearGenericSurface(GenericSurface):
         # ``__call__``/``get_value`` argument validation in the hot loop).
         args = (alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
 
-        # Compute aerodynamic forces
-        lift = dyn_pressure_area * self.cLf.get_value_opt(
-            *args
-        ) + dyn_pressure_area_damping * self.cLd.get_value_opt(*args)
+        # Compute aerodynamic forces (forcing + reduced-rate damping)
+        lift = dyn_pressure_area * (
+            self.cLf.get_value_opt(*args) + self.cLd.get_value_opt(*args)
+        )
+        side = dyn_pressure_area * (
+            self.cQf.get_value_opt(*args) + self.cQd.get_value_opt(*args)
+        )
+        drag = dyn_pressure_area * (
+            self.cDf.get_value_opt(*args) + self.cDd.get_value_opt(*args)
+        )
 
-        side = dyn_pressure_area * self.cQf.get_value_opt(
-            *args
-        ) + dyn_pressure_area_damping * self.cQd.get_value_opt(*args)
-
-        drag = dyn_pressure_area * self.cDf.get_value_opt(
-            *args
-        ) + dyn_pressure_area_damping * self.cDd.get_value_opt(*args)
-
-        # Compute aerodynamic moments
-        pitch = dyn_pressure_area_length * self.cmf.get_value_opt(
-            *args
-        ) + dyn_pressure_area_length_damping * self.cmd.get_value_opt(*args)
-
-        yaw = dyn_pressure_area_length * self.cnf.get_value_opt(
-            *args
-        ) + dyn_pressure_area_length_damping * self.cnd.get_value_opt(*args)
-
-        roll = dyn_pressure_area_length * self.clf.get_value_opt(
-            *args
-        ) + dyn_pressure_area_length_damping * self.cld.get_value_opt(*args)
+        # Compute aerodynamic moments (forcing + reduced-rate damping)
+        pitch = dyn_pressure_area_length * (
+            self.cmf.get_value_opt(*args) + self.cmd.get_value_opt(*args)
+        )
+        yaw = dyn_pressure_area_length * (
+            self.cnf.get_value_opt(*args) + self.cnd.get_value_opt(*args)
+        )
+        roll = dyn_pressure_area_length * (
+            self.clf.get_value_opt(*args) + self.cld.get_value_opt(*args)
+        )
 
         return lift, side, drag, pitch, yaw, roll

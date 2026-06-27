@@ -1,5 +1,8 @@
 from rocketpy.rocket.aero_surface.aero_surface import AeroSurface
 from rocketpy.rocket.aero_surface.air_brakes import AirBrakes
+from rocketpy.rocket.aero_surface.controllable_generic_surface import (
+    ControllableGenericSurface,
+)
 from rocketpy.rocket.aero_surface.fins import (
     EllipticalFin,
     EllipticalFins,
@@ -9,9 +12,6 @@ from rocketpy.rocket.aero_surface.fins import (
     FreeFormFins,
     TrapezoidalFin,
     TrapezoidalFins,
-)
-from rocketpy.rocket.aero_surface.controllable_generic_surface import (
-    ControllableGenericSurface,
 )
 from rocketpy.rocket.aero_surface.generic_surface import GenericSurface
 from rocketpy.rocket.aero_surface.linear_generic_surface import LinearGenericSurface

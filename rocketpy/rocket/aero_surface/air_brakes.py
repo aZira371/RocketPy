@@ -120,7 +120,14 @@ class AirBrakes(ControllableGenericSurface):
         # ``deployment_level`` control axis. The deployment-0 ⇒ Cd 0 rule applies
         # only when the air brakes add to (rather than override) the rocket drag.
         def drag_coefficient_function(
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate, deployment_level
+            alpha,
+            beta,
+            mach,
+            reynolds,
+            pitch_rate,
+            yaw_rate,
+            roll_rate,
+            deployment_level,
         ):  # pylint: disable=unused-argument
             if deployment_level == 0 and not self.override_rocket_drag:
                 return 0.0

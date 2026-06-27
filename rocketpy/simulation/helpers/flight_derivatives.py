@@ -91,9 +91,23 @@ def _aerodynamic_drag_force(
     # Air brakes are drag-only and may override the rocket drag.
     for air_brakes in rocket.air_brakes:
         if air_brakes.deployment_level > 0:
+            # Air brakes are a (controllable) generic surface, so feed the
+            # coefficient the non-dimensional reduced rates, like every other
+            # generic surface (see GenericSurface.compute_forces_and_moments).
+            reduced = (
+                air_brakes.reference_length / (2 * stream_speed)
+                if stream_speed > 0
+                else 0.0
+            )
             air_brakes_cd = air_brakes.cD.get_value_opt(
                 *air_brakes._coefficient_arguments(
-                    alpha, beta, mach, reynolds, omega[0], omega[1], omega[2]
+                    alpha,
+                    beta,
+                    mach,
+                    reynolds,
+                    omega[0] * reduced,
+                    omega[1] * reduced,
+                    omega[2] * reduced,
                 )
             )
             air_brakes_force = (
@@ -342,7 +356,14 @@ def u_dot(flight, t, u, post_processing=False):
         dynamic_viscosity,
     )
     R3 = _aerodynamic_drag_force(
-        flight, t, rho, free_stream_speed, alpha, beta, mach, reynolds,
+        flight,
+        t,
+        rho,
+        free_stream_speed,
+        alpha,
+        beta,
+        mach,
+        reynolds,
         (omega1, omega2, omega3),
     )
     # Off center moment
@@ -578,7 +599,14 @@ def u_dot_generalized_3dof(flight, t, u, post_processing=False):
     # Drag computation (rocket body drag + air brakes)
     R1, R2 = 0, 0
     R3 = _aerodynamic_drag_force(
-        flight, t, rho, free_stream_speed, alpha, beta, mach, reynolds,
+        flight,
+        t,
+        rho,
+        free_stream_speed,
+        alpha,
+        beta,
+        mach,
+        reynolds,
         (omega1, omega2, omega3),
     )
 
@@ -816,7 +844,14 @@ def u_dot_generalized(flight, t, u, post_processing=False):
     else:
         net_thrust = 0
     R3 = _aerodynamic_drag_force(
-        flight, t, rho, free_stream_speed, alpha, beta, mach, reynolds,
+        flight,
+        t,
+        rho,
+        free_stream_speed,
+        alpha,
+        beta,
+        mach,
+        reynolds,
         (omega1, omega2, omega3),
     )
     # Get rocket velocity in body frame

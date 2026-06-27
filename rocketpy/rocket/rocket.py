@@ -1,4 +1,3 @@
-import csv
 import inspect
 import math
 import warnings
@@ -21,6 +20,7 @@ from rocketpy.rocket.aero_surface import (
     Tail,
     TrapezoidalFins,
 )
+from rocketpy.rocket.aero_surface.aero_coefficient import AeroCoefficient
 from rocketpy.rocket.aero_surface.fins.elliptical_fin import EllipticalFin
 from rocketpy.rocket.aero_surface.fins.free_form_fin import FreeFormFin
 from rocketpy.rocket.aero_surface.fins.free_form_fins import FreeFormFins
@@ -165,12 +165,14 @@ class Rocket:
     Rocket.power_on_drag_input : int, float, callable, string, array, Function
         Original user input for rocket's drag coefficient when the motor is
         on. Preserved for reconstruction and Monte Carlo workflows.
-    Rocket.power_off_drag_7d : Function
-        Rocket's drag coefficient with motor off as a 7D function of
-        (alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate).
-    Rocket.power_on_drag_7d : Function
-        Rocket's drag coefficient with motor on as a 7D function of
-        (alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate).
+    Rocket.power_off_drag_7d : AeroCoefficient
+        Rocket's drag coefficient with motor off, callable over the seven
+        independent variables (alpha, beta, mach, reynolds, pitch_rate,
+        yaw_rate, roll_rate) and stored at its intrinsic dimensionality.
+    Rocket.power_on_drag_7d : AeroCoefficient
+        Rocket's drag coefficient with motor on, callable over the seven
+        independent variables (alpha, beta, mach, reynolds, pitch_rate,
+        yaw_rate, roll_rate) and stored at its intrinsic dimensionality.
     Rocket.power_off_drag_by_mach : Function
         Rocket's drag coefficient with motor off as a function of Mach number.
     Rocket.power_on_drag_by_mach : Function
@@ -348,20 +350,20 @@ class Rocket:
         self.surfaces_cp_to_cdm = {}
         self.rail_buttons = Components()
 
-        self.aerodynamic_center = Function(
+        self._aerodynamic_center = Function(
             lambda mach: 0,
             inputs="Mach Number",
             outputs="Aerodynamic Center Position (m)",
         )
-        self.total_lift_coeff_der = Function(
+        self._total_lift_coeff_der = Function(
             lambda mach: 0,
             inputs="Mach Number",
             outputs="Total Lift Coefficient Derivative",
         )
-        self.static_margin = Function(
+        self._static_margin = Function(
             lambda time: 0, inputs="Time (s)", outputs="Static Margin (c)"
         )
-        self.stability_margin = Function(
+        self._stability_margin = Function(
             lambda mach, time: 0,
             inputs=["Mach", "Time (s)"],
             outputs="Stability Margin (c)",
@@ -369,32 +371,40 @@ class Rocket:
         # Yaw-plane counterparts. The pitch-plane attributes above remain the
         # primary (default) margin; these expose the yaw plane for
         # non-axisymmetric rockets (see ``evaluate_center_of_pressure``).
-        self.aerodynamic_center_yaw = Function(
+        self._aerodynamic_center_yaw = Function(
             lambda mach: 0,
             inputs="Mach Number",
             outputs="Aerodynamic Center Position - Yaw (m)",
         )
-        self.total_side_coeff_der = Function(
+        self._total_side_coeff_der = Function(
             lambda mach: 0,
             inputs="Mach Number",
             outputs="Total Side Coefficient Derivative",
         )
-        self.static_margin_yaw = Function(
+        self._static_margin_yaw = Function(
             lambda time: 0, inputs="Time (s)", outputs="Static Margin - Yaw (c)"
         )
-        self.stability_margin_yaw = Function(
+        self._stability_margin_yaw = Function(
             lambda mach, time: 0,
             inputs=["Mach", "Time (s)"],
             outputs="Stability Margin - Yaw (c)",
         )
 
-        # Define aerodynamic drag coefficients
-        # Coefficients used during flight simulation
-        self.power_off_drag_7d = self.__process_drag_input(
-            power_off_drag, "Drag Coefficient with Power Off"
+        # Define aerodynamic drag coefficients used during flight simulation.
+        # Drag is stored at its intrinsic dimensionality over the seven base
+        # independent variables; 1-D inputs are taken as Mach, and "constant"
+        # extrapolation is used (drag should not extrapolate beyond its range).
+        self.power_off_drag_7d = AeroCoefficient(
+            power_off_drag,
+            name="Drag Coefficient with Power Off",
+            extrapolation="constant",
+            single_var="mach",
         )
-        self.power_on_drag_7d = self.__process_drag_input(
-            power_on_drag, "Drag Coefficient with Power On"
+        self.power_on_drag_7d = AeroCoefficient(
+            power_on_drag,
+            name="Drag Coefficient with Power On",
+            extrapolation="constant",
+            single_var="mach",
         )
         self.power_on_drag_by_mach = Function(
             lambda mach: self.power_on_drag_7d(0, 0, mach, 0, 0, 0, 0),
@@ -436,10 +446,12 @@ class Rocket:
         self.evaluate_reduced_mass()
         self.evaluate_thrust_to_weight()
 
-        # Evaluate stability (even though no aerodynamic surfaces are present yet)
-        self.evaluate_center_of_pressure()
-        self.evaluate_stability_margin()
-        self.evaluate_static_margin()
+        # The aerodynamic center and the margins are evaluated lazily (see the
+        # ``aerodynamic_center`` / ``static_margin`` properties); just flag them
+        # outdated here. They are rebuilt on first access, once all surfaces and
+        # the motor have been added.
+        self._cp_outdated = True
+        self._margin_outdated = True
 
         # Initialize plots and prints object
         self.prints = _RocketPrints(self)
@@ -633,6 +645,80 @@ class Rocket:
         self.thrust_to_weight.set_outputs("Thrust/Weight")
         self.thrust_to_weight.set_title("Thrust to Weight ratio")
 
+    # Lazily-evaluated aerodynamic outputs.
+    #
+    # The pitch/yaw aerodynamic centers and the static/stability margins are
+    # *derived* from the aerodynamic surfaces (and, for the margins, the center
+    # of mass). Rather than recompute them eagerly on every ``add_*`` call - an
+    # O(N^2) cost while building, repeated for every rocket in a Monte Carlo run -
+    # the mutating methods only flag them outdated; the value is rebuilt on first
+    # access and cached until the next change. ``_cp_outdated`` tracks the
+    # surface-dependent centers; ``_margin_outdated`` additionally tracks the
+    # center of mass, so adding a motor refreshes the margins without recomputing
+    # the surface-only aerodynamic center.
+
+    def _ensure_aerodynamic_center(self):
+        """Recompute the pitch/yaw aerodynamic centers if a surface changed."""
+        if self._cp_outdated:
+            self.evaluate_center_of_pressure()  # clears ``_cp_outdated``
+
+    def _ensure_margins(self):
+        """Recompute the static/stability margins if a surface or the center of
+        mass changed. The underlying aerodynamic center is refreshed lazily by
+        the margin source closures."""
+        if self._margin_outdated:
+            self._margin_outdated = False
+            self.evaluate_stability_margin()
+            self.evaluate_static_margin()
+
+    @property
+    def aerodynamic_center(self):
+        """Pitch-plane aerodynamic center vs Mach (lazily evaluated)."""
+        self._ensure_aerodynamic_center()
+        return self._aerodynamic_center
+
+    @property
+    def aerodynamic_center_yaw(self):
+        """Yaw-plane aerodynamic center vs Mach (lazily evaluated)."""
+        self._ensure_aerodynamic_center()
+        return self._aerodynamic_center_yaw
+
+    @property
+    def total_lift_coeff_der(self):
+        """Total normal-force-coefficient derivative vs Mach (lazily evaluated)."""
+        self._ensure_aerodynamic_center()
+        return self._total_lift_coeff_der
+
+    @property
+    def total_side_coeff_der(self):
+        """Total side-force-coefficient derivative vs Mach (lazily evaluated)."""
+        self._ensure_aerodynamic_center()
+        return self._total_side_coeff_der
+
+    @property
+    def static_margin(self):
+        """Pitch-plane static margin (calibers) vs time (lazily evaluated)."""
+        self._ensure_margins()
+        return self._static_margin
+
+    @property
+    def static_margin_yaw(self):
+        """Yaw-plane static margin (calibers) vs time (lazily evaluated)."""
+        self._ensure_margins()
+        return self._static_margin_yaw
+
+    @property
+    def stability_margin(self):
+        """Pitch-plane stability margin (calibers) vs Mach and time (lazy)."""
+        self._ensure_margins()
+        return self._stability_margin
+
+    @property
+    def stability_margin_yaw(self):
+        """Yaw-plane stability margin (calibers) vs Mach and time (lazy)."""
+        self._ensure_margins()
+        return self._stability_margin_yaw
+
     def evaluate_center_of_pressure(self):
         """Evaluates the rocket's **aerodynamic center** as a function of Mach
         number, relative to the user-defined rocket reference system.
@@ -661,11 +747,17 @@ class Rocket:
             reference system. See :doc:`Positions and Coordinate Systems
             </user/positions>` for more information.
         """
+        # Mark the pitch/yaw centers up to date before computing, so that a read
+        # of the ``aerodynamic_center`` property during this method (the
+        # ``is_axisymmetric`` check below) returns the value being built here
+        # rather than recursing back into this method.
+        self._cp_outdated = False
+
         # Re-Initialize total force coefficient derivatives and AC positions
-        self.total_lift_coeff_der.set_source(lambda mach: 0)
-        self.aerodynamic_center.set_source(lambda mach: 0)
-        self.total_side_coeff_der.set_source(lambda mach: 0)
-        self.aerodynamic_center_yaw.set_source(lambda mach: 0)
+        self._total_lift_coeff_der.set_source(lambda mach: 0)
+        self._aerodynamic_center.set_source(lambda mach: 0)
+        self._total_side_coeff_der.set_source(lambda mach: 0)
+        self._aerodynamic_center_yaw.set_source(lambda mach: 0)
 
         # Calculate total force coefficient derivatives and aerodynamic center
         if len(self.aerodynamic_surfaces) > 0:
@@ -674,31 +766,47 @@ class Rocket:
                 cp_z = aero_surface.center_of_pressure_z
                 # ref_factor corrects force for different reference areas
                 ref_factor = aero_surface.reference_area / self.area
-                self.total_lift_coeff_der += ref_factor * lift_coeff_der
-                self.aerodynamic_center += (
+                self._total_lift_coeff_der += ref_factor * lift_coeff_der
+                self._aerodynamic_center += (
                     ref_factor * lift_coeff_der * (position.z - self._csys * cp_z)
                 )
 
                 # Yaw plane.
                 side_coeff_der = aero_surface.side_coefficient_derivative
                 cp_z_yaw = aero_surface.center_of_pressure_z_yaw
-                self.total_side_coeff_der += ref_factor * side_coeff_der
-                self.aerodynamic_center_yaw += (
+                self._total_side_coeff_der += ref_factor * side_coeff_der
+                self._aerodynamic_center_yaw += (
                     ref_factor * side_coeff_der * (position.z - self._csys * cp_z_yaw)
                 )
             # Avoid errors when only zero-lift surfaces are added
-            if self.total_lift_coeff_der.get_value(0) != 0:
-                self.aerodynamic_center /= self.total_lift_coeff_der
-            if self.total_side_coeff_der.get_value(0) != 0:
-                self.aerodynamic_center_yaw /= self.total_side_coeff_der
+            if self._total_lift_coeff_der.get_value(0) != 0:
+                self._aerodynamic_center /= self._total_lift_coeff_der
+            if self._total_side_coeff_der.get_value(0) != 0:
+                self._aerodynamic_center_yaw /= self._total_side_coeff_der
 
-            self._warn_if_asymmetric_cp()
-        return self.aerodynamic_center
+        return self._aerodynamic_center
 
     def _cp_plane_max_difference(self):
-        """Largest pitch- vs yaw-plane aerodynamic center difference, in meters,
-        over a few sample Mach numbers."""
-        sample_machs = (0.0, 0.5, 1.0)
+        """Largest pitch- vs yaw-plane aerodynamic center difference, in meters.
+
+        The difference is sampled densely across the subsonic, transonic and
+        supersonic regimes rather than at a few fixed Mach numbers. A
+        non-axisymmetric configuration (only possible through a ``GenericSurface``
+        with non-mirror coefficients) can have its pitch/yaw aerodynamic centers
+        diverge in any Mach range, and the difference can vanish at isolated Mach
+        numbers; sparse fixed sampling (e.g. only 0, 0.5, 1) risks a *false
+        negative* -- silently reporting an asymmetric rocket as axisymmetric, so
+        the user trusts the pitch-plane-only static margin. The built-in
+        (Barrowman) surfaces are symmetric by construction, so this returns
+        exactly 0 for them at every Mach (no false positives). This runs once at
+        setup, not in the integration loop, so a dense sweep is cheap.
+        """
+        # 0 to 3 in 0.2 steps covers RocketPy's flight regimes (sub/trans/
+        # supersonic) with enough resolution that a real asymmetry, which spans a
+        # Mach *range*, cannot fall entirely between sample points. This only
+        # runs for rockets that contain a generic surface or individual fin (see
+        # the by-construction short-circuit in ``is_axisymmetric``).
+        sample_machs = np.linspace(0.0, 3.0, 16)
         return max(
             abs(
                 self.aerodynamic_center.get_value_opt(mach)
@@ -715,8 +823,37 @@ class Rocket:
         ``stability_margin`` describe the PITCH plane only and differ from their
         ``*_yaw`` counterparts (``aerodynamic_center_yaw``, ``static_margin_yaw``,
         ``stability_margin_yaw``)."""
+        # Fast path: the built-in nose, tail and fin sets contribute identically
+        # to the pitch and yaw planes by construction, so a rocket made only of
+        # surfaces that are axisymmetric-by-construction is axisymmetric without
+        # evaluating anything. Only a generic surface or an individual fin can
+        # break it, in which case fall back to the numeric Mach sweep below.
+        if all(
+            getattr(surface, "is_axisymmetric", False)
+            for surface, _ in self.aerodynamic_surfaces
+        ):
+            return True
         # Tolerance relative to the rocket diameter (caliber-scale).
         return self._cp_plane_max_difference() <= 1e-6 * (2 * self.radius)
+
+    def _warn_if_not_axisymmetric(self):
+        """Warn, at surface-add time, when the rocket is non-axisymmetric so the
+        user knows the scalar ``static_margin``/``stability_margin`` describe the
+        pitch plane only. Short-circuits with no computation for rockets built
+        solely from axisymmetric-by-construction surfaces (the Barrowman set);
+        only a generic surface or individual fin triggers the Mach sweep."""
+        if not self.aerodynamic_surfaces or self.is_axisymmetric:
+            return
+        max_diff = self._cp_plane_max_difference()
+        warnings.warn(
+            "Pitch- and yaw-plane aerodynamic centers differ "
+            f"(max difference ~{max_diff:.4g} m): the rocket is not "
+            "axisymmetric. 'aerodynamic_center', 'static_margin' and "
+            "'stability_margin' describe the PITCH plane; use "
+            "'aerodynamic_center_yaw', 'static_margin_yaw' and "
+            "'stability_margin_yaw' for the yaw plane.",
+            stacklevel=3,
+        )
 
     @property
     def cp_position(self):
@@ -731,34 +868,6 @@ class Rocket:
             stacklevel=2,
         )
         return self.aerodynamic_center
-
-    @property
-    def cp_position_yaw(self):
-        """Deprecated alias for :attr:`aerodynamic_center_yaw`."""
-        warnings.warn(
-            "'cp_position_yaw' is deprecated and will be removed in a future "
-            "release; use 'aerodynamic_center_yaw' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.aerodynamic_center_yaw
-
-    def _warn_if_asymmetric_cp(self):
-        """Warn when the pitch- and yaw-plane aerodynamic centers disagree, i.e.
-        the rocket is not axisymmetric. The ``static_margin``/
-        ``stability_margin`` attributes then describe the pitch plane only; the
-        yaw-plane counterparts are ``*_yaw``."""
-        if not self.is_axisymmetric:
-            max_diff = self._cp_plane_max_difference()
-            warnings.warn(
-                "Pitch- and yaw-plane aerodynamic centers differ "
-                f"(max difference ~{max_diff:.4g} m): the rocket is not "
-                "axisymmetric. 'aerodynamic_center', 'static_margin' and "
-                "'stability_margin' describe the PITCH plane; use "
-                "'aerodynamic_center_yaw', 'static_margin_yaw' and "
-                "'stability_margin_yaw' for the yaw plane.",
-                stacklevel=2,
-            )
 
     def _aerodynamic_center_limit(self, alpha, beta, mach):
         """Small-incidence limit of :meth:`center_of_pressure`: the linearized
@@ -872,8 +981,15 @@ class Rocket:
         for surface, _ in self.aerodynamic_surfaces:
             cp = self.surfaces_cp_to_cdm[surface]
             forces = surface.compute_forces_and_moments(
-                stream_velocity, stream_speed, mach, 1.0, cp, omega,
-                density, dynamic_viscosity, 0.0,
+                stream_velocity,
+                stream_speed,
+                mach,
+                1.0,
+                cp,
+                omega,
+                density,
+                dynamic_viscosity,
+                0.0,
             )
             totals = [acc + value for acc, value in zip(totals, forces)]
         return (*totals, stream_speed)
@@ -970,156 +1086,6 @@ class Rocket:
             "cl": m3 / dynamic_pressure_area_length,
         }
 
-    def center_of_pressure_over_alpha(self, mach=0.0, beta=0.0, reynolds=0.0):
-        """Center of pressure position as a Function of angle of attack.
-
-        Convenience wrapper around :meth:`center_of_pressure` that fixes the
-        Mach number, sideslip and Reynolds number and exposes the center of
-        pressure travel with angle of attack as a plottable :class:`Function`.
-
-        Parameters
-        ----------
-        mach : float, optional
-            Free-stream Mach number. Default 0.
-        beta : float, optional
-            Sideslip angle, in radians. Default 0.
-        reynolds : float, optional
-            Rocket-level Reynolds number. Default 0.
-
-        Returns
-        -------
-        Function
-            Center of pressure position (m) versus angle of attack (rad).
-        """
-        return Function(
-            lambda alpha: self.center_of_pressure(alpha, beta, mach, reynolds),
-            inputs="Angle of Attack (rad)",
-            outputs="Center of Pressure Position (m)",
-            title="Center of Pressure vs Angle of Attack",
-        )
-
-    def stability_margin_over_alpha(
-        self, mach=0.0, beta=0.0, reynolds=0.0, time=0.0
-    ):
-        """Stability margin in calibers as a Function of angle of attack.
-
-        The center-of-gravity-to-center-of-pressure distance divided by the
-        rocket diameter, using the nonlinear :meth:`center_of_pressure` so the
-        margin reflects how the center of pressure moves with incidence. This is
-        the angle-of-attack analogue of :attr:`static_margin` (which is the
-        ``alpha = 0`` value as a function of time).
-
-        Parameters
-        ----------
-        mach : float, optional
-            Free-stream Mach number. Default 0.
-        beta : float, optional
-            Sideslip angle, in radians. Default 0.
-        reynolds : float, optional
-            Rocket-level Reynolds number. Default 0.
-        time : float, optional
-            Time at which the center of mass is evaluated, in seconds. Default 0
-            (the fully loaded condition).
-
-        Returns
-        -------
-        Function
-            Stability margin (calibers) versus angle of attack (rad).
-        """
-        center_of_pressure = self.center_of_pressure_over_alpha(mach, beta, reynolds)
-        center_of_mass = self.center_of_mass.get_value_opt(time)
-        diameter = 2 * self.radius
-        return Function(
-            lambda alpha: (
-                (center_of_mass - center_of_pressure.get_value_opt(alpha))
-                / diameter
-                * self._csys
-            ),
-            inputs="Angle of Attack (rad)",
-            outputs="Stability Margin (c)",
-            title="Stability Margin vs Angle of Attack",
-        )
-
-    def center_of_pressure_over_beta(self, mach=0.0, alpha=0.0, reynolds=0.0):
-        """Center of pressure position as a Function of sideslip angle.
-
-        Yaw-plane companion to :meth:`center_of_pressure_over_alpha`: fixes the
-        Mach number, angle of attack and Reynolds number and exposes the center
-        of pressure travel with sideslip as a plottable :class:`Function`.
-
-        Parameters
-        ----------
-        mach : float, optional
-            Free-stream Mach number. Default 0.
-        alpha : float, optional
-            Angle of attack, in radians. Default 0.
-        reynolds : float, optional
-            Rocket-level Reynolds number. Default 0.
-
-        Returns
-        -------
-        Function
-            Center of pressure position (m) versus sideslip angle (rad).
-        """
-        def _cp(beta):
-            # At the exact origin the CP is a 0/0 limit; the general
-            # center_of_pressure resolves it to the PITCH-plane aerodynamic
-            # center (consistent with static_margin). For a pure-sideslip sweep
-            # the correct limit is instead the YAW-plane aerodynamic center,
-            # which the nonlinear value converges to as beta grows -- use it at
-            # beta = 0 so the sweep stays continuous.
-            if alpha == 0.0 and beta == 0.0:
-                return self.aerodynamic_center_yaw.get_value_opt(mach)
-            return self.center_of_pressure(alpha, beta, mach, reynolds)
-
-        return Function(
-            _cp,
-            inputs="Sideslip Angle (rad)",
-            outputs="Center of Pressure Position (m)",
-            title="Center of Pressure vs Sideslip Angle",
-        )
-
-    def stability_margin_over_beta(
-        self, mach=0.0, alpha=0.0, reynolds=0.0, time=0.0
-    ):
-        """Stability margin in calibers as a Function of sideslip angle.
-
-        Yaw-plane companion to :meth:`stability_margin_over_alpha`: the
-        center-of-gravity-to-center-of-pressure distance divided by the rocket
-        diameter, using the nonlinear :meth:`center_of_pressure` so the margin
-        reflects how the center of pressure moves with sideslip.
-
-        Parameters
-        ----------
-        mach : float, optional
-            Free-stream Mach number. Default 0.
-        alpha : float, optional
-            Angle of attack, in radians. Default 0.
-        reynolds : float, optional
-            Rocket-level Reynolds number. Default 0.
-        time : float, optional
-            Time at which the center of mass is evaluated, in seconds. Default 0
-            (the fully loaded condition).
-
-        Returns
-        -------
-        Function
-            Stability margin (calibers) versus sideslip angle (rad).
-        """
-        center_of_pressure = self.center_of_pressure_over_beta(mach, alpha, reynolds)
-        center_of_mass = self.center_of_mass.get_value_opt(time)
-        diameter = 2 * self.radius
-        return Function(
-            lambda beta: (
-                (center_of_mass - center_of_pressure.get_value_opt(beta))
-                / diameter
-                * self._csys
-            ),
-            inputs="Sideslip Angle (rad)",
-            outputs="Stability Margin (c)",
-            title="Stability Margin vs Sideslip Angle",
-        )
-
     def evaluate_surfaces_cp_to_cdm(self):
         """Calculates the relative position of each aerodynamic surface center
         of pressure to the rocket's center of dry mass in Body Axes Coordinate
@@ -1173,7 +1139,7 @@ class Rocket:
             the center of pressure and the center of mass, divided by the
             rocket's diameter.
         """
-        self.stability_margin.set_source(
+        self._stability_margin.set_source(
             lambda mach, time: (
                 (
                     (
@@ -1186,7 +1152,7 @@ class Rocket:
             )
         )
         # Yaw-plane stability margin (equal to the pitch plane when axisymmetric)
-        self.stability_margin_yaw.set_source(
+        self._stability_margin_yaw.set_source(
             lambda mach, time: (
                 (
                     (
@@ -1198,7 +1164,7 @@ class Rocket:
                 * self._csys
             )
         )
-        return self.stability_margin
+        return self._stability_margin
 
     def evaluate_static_margin(self):
         """Calculates the static margin of the rocket as a function of time.
@@ -1211,7 +1177,7 @@ class Rocket:
             pressure and the center of mass, divided by the rocket's diameter.
         """
         # Calculate static margin
-        self.static_margin.set_source(
+        self._static_margin.set_source(
             lambda time: (
                 (
                     self.center_of_mass.get_value_opt(time)
@@ -1221,16 +1187,16 @@ class Rocket:
             )
         )
         # Change sign if coordinate system is upside down
-        self.static_margin *= self._csys
-        self.static_margin.set_inputs("Time (s)")
-        self.static_margin.set_outputs("Static Margin (c)")
-        self.static_margin.set_title("Static Margin")
-        self.static_margin.set_discrete(
+        self._static_margin *= self._csys
+        self._static_margin.set_inputs("Time (s)")
+        self._static_margin.set_outputs("Static Margin (c)")
+        self._static_margin.set_title("Static Margin")
+        self._static_margin.set_discrete(
             lower=0, upper=self.motor.burn_out_time, samples=200
         )
 
         # Yaw-plane static margin (equal to the pitch plane when axisymmetric)
-        self.static_margin_yaw.set_source(
+        self._static_margin_yaw.set_source(
             lambda time: (
                 (
                     self.center_of_mass.get_value_opt(time)
@@ -1239,14 +1205,14 @@ class Rocket:
                 / (2 * self.radius)
             )
         )
-        self.static_margin_yaw *= self._csys
-        self.static_margin_yaw.set_inputs("Time (s)")
-        self.static_margin_yaw.set_outputs("Static Margin - Yaw (c)")
-        self.static_margin_yaw.set_title("Static Margin - Yaw")
-        self.static_margin_yaw.set_discrete(
+        self._static_margin_yaw *= self._csys
+        self._static_margin_yaw.set_inputs("Time (s)")
+        self._static_margin_yaw.set_outputs("Static Margin - Yaw (c)")
+        self._static_margin_yaw.set_title("Static Margin - Yaw")
+        self._static_margin_yaw.set_discrete(
             lower=0, upper=self.motor.burn_out_time, samples=200
         )
-        return self.static_margin
+        return self._static_margin
 
     def evaluate_dry_inertias(self):
         """Calculates and returns the rocket's dry inertias relative to
@@ -1576,10 +1542,10 @@ class Rocket:
         self.evaluate_inertias()
         self.evaluate_reduced_mass()
         self.evaluate_thrust_to_weight()
-        self.evaluate_center_of_pressure()
         self.evaluate_surfaces_cp_to_cdm()
-        self.evaluate_stability_margin()
-        self.evaluate_static_margin()
+        # The motor changes the center of mass (and thus the margins) but not the
+        # surface-only aerodynamic center; flag only the margins for lazy rebuild.
+        self._margin_outdated = True
         self.evaluate_com_to_cdm_function()
         self.evaluate_nozzle_gyration_tensor()
 
@@ -1658,9 +1624,15 @@ class Rocket:
         else:
             self.__add_single_surface(surfaces, positions)
 
-        self.evaluate_center_of_pressure()
-        self.evaluate_stability_margin()
-        self.evaluate_static_margin()
+        # Adding a surface changes both the aerodynamic center and the margins;
+        # flag them for lazy rebuild on next access (see the properties).
+        self._cp_outdated = True
+        self._margin_outdated = True
+
+        # The asymmetry warning is the one piece evaluated eagerly: it is a
+        # setup-time hint about which margin attributes to trust, and the check
+        # is free for axisymmetric-by-construction (Barrowman) rockets.
+        self._warn_if_not_axisymmetric()
 
     def add_vehicle_aerodynamic_surface(
         self, coefficients, reference_position=None, name="Vehicle Aerodynamics"
@@ -2556,73 +2528,6 @@ class Rocket:
         else:
             return air_brakes
 
-    def add_controllable_surface(
-        self,
-        surface,
-        position,
-        controller_function,
-        sampling_rate,
-        controlled_object_name="controllable_surface",
-        context=None,
-        name="Controller",
-        controller_needs=None,
-        return_controller=False,
-    ):
-        """Add a controllable aerodynamic surface and the controller that drives
-        its deflection during flight.
-
-        The surface is added like any other aerodynamic surface (so it flows
-        through the standard per-surface force/moment computation), and a
-        controller is registered to mutate the surface's control variables each
-        sample. The controller function should set the surface's deflection via
-        ``surface.set_control(name, value)``.
-
-        Parameters
-        ----------
-        surface : ControllableGenericSurface
-            The controllable surface to add.
-        position : int, float, tuple, list, Vector
-            Position of the surface, in the same convention as
-            :meth:`add_surfaces`.
-        controller_function : callable
-            Control logic, ``controller_function(**kwargs) -> dict or None``.
-            See :class:`rocketpy.control.controller._Controller` for the
-            available ``kwargs``. The controlled surface is exposed under
-            ``controlled_object_name``.
-        sampling_rate : float
-            Controller sampling rate in hertz.
-        controlled_object_name : str, optional
-            Friendly name under which the surface is exposed in the controller
-            ``kwargs``. Default ``"controllable_surface"``.
-        context : dict, optional
-            Initial persistent controller context. Default ``None``.
-        name : str, optional
-            Controller name. Default ``"Controller"``.
-        controller_needs : list or frozenset of str or None, optional
-            Expensive simulation values the controller accesses.
-        return_controller : bool, optional
-            If True, also return the created controller. Default False.
-
-        Returns
-        -------
-        ControllableGenericSurface or tuple
-            The surface, or ``(surface, controller)`` if ``return_controller``.
-        """
-        self.add_surfaces(surface, position)
-        controller = _Controller(
-            controller_function=controller_function,
-            controlled_objects=surface,
-            controlled_objects_name=controlled_object_name,
-            sampling_rate=sampling_rate,
-            context=context if context is not None else {},
-            name=name,
-            controller_needs=controller_needs,
-        )
-        self._add_controllers(controller)
-        if return_controller:
-            return surface, controller
-        return surface
-
     def set_rail_buttons(
         self,
         upper_button_position,
@@ -3006,271 +2911,3 @@ class Rocket:
             rocket._add_controllers(controller)
 
         return rocket
-
-    def __process_drag_input(self, input_data, coeff_name):
-        """Process drag coefficient input and normalize it to a 7D Function.
-
-        Parameters
-        ----------
-        input_data : int, float, str, callable, Function
-            Input data to be processed.
-        coeff_name : str
-            Name of the coefficient being processed for error reporting.
-
-        Returns
-        -------
-        Function
-            Function object with 7 input arguments in the following order:
-            alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate.
-        """
-        inputs = [
-            "alpha",
-            "beta",
-            "mach",
-            "reynolds",
-            "pitch_rate",
-            "yaw_rate",
-            "roll_rate",
-        ]
-
-        # Helper: lift a 1D Mach-only source into the required 7D signature.
-        def _wrap_mach_only_source(mach_source):
-            return Function(
-                lambda alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate: (
-                    mach_source(mach)
-                ),
-                inputs,
-                [coeff_name],
-                interpolation="linear",
-                extrapolation="constant",
-            )
-
-        # Helper: enforce that Function-based inputs are either 1D (Mach) or 7D.
-        def _validate_function_domain_dimension(function):
-            if function.__dom_dim__ not in (1, 7):
-                raise ValueError(
-                    f"{coeff_name} function must have either 1 input argument "
-                    "(mach) or 7 input arguments (alpha, beta, mach, reynolds, "
-                    "pitch_rate, yaw_rate, roll_rate), in that order."
-                )
-
-        # Helper: count required positional arguments in a callable.
-        def _count_positional_args(callable_obj):
-            signature = inspect.signature(callable_obj)
-            positional_params = [
-                parameter
-                for parameter in signature.parameters.values()
-                if parameter.kind
-                in (
-                    inspect.Parameter.POSITIONAL_ONLY,
-                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                )
-                and parameter.default is inspect.Parameter.empty
-            ]
-            return len(positional_params)
-
-        # Case 1: string input can be a CSV path or any Function-supported source.
-        if isinstance(input_data, str):
-            if input_data.lower().endswith(".csv"):
-                return self.__load_rocket_drag_csv(input_data, coeff_name)
-
-            function_data = Function(input_data)
-            _validate_function_domain_dimension(function_data)
-            if function_data.__dom_dim__ == 7:
-                function_data.set_extrapolation("constant")
-                return function_data
-            return _wrap_mach_only_source(function_data.get_value_opt)
-
-        # Case 2: Function input is accepted directly after domain validation.
-        if isinstance(input_data, Function):
-            _validate_function_domain_dimension(input_data)
-            if input_data.__dom_dim__ == 7:
-                input_data.set_extrapolation("constant")
-                return input_data
-            return _wrap_mach_only_source(input_data.get_value_opt)
-
-        # Case 3: callable input must expose either 1 (Mach) or 7 arguments.
-        if callable(input_data):
-            n_positional_args = _count_positional_args(input_data)
-            if n_positional_args not in (1, 7):
-                raise ValueError(
-                    f"{coeff_name} callable must have either 1 positional "
-                    "argument (mach) or 7 positional arguments (alpha, beta, "
-                    "mach, reynolds, pitch_rate, yaw_rate, roll_rate), in that "
-                    "order."
-                )
-
-            if n_positional_args == 1:
-                return _wrap_mach_only_source(input_data)
-
-            return Function(
-                input_data,
-                inputs,
-                [coeff_name],
-                interpolation="linear",
-                extrapolation="constant",
-            )
-
-        # Case 4: scalar input means a constant drag coefficient in all conditions.
-        if isinstance(input_data, (int, float)):
-            return Function(
-                lambda alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate: (
-                    float(input_data)
-                ),
-                inputs,
-                [coeff_name],
-                interpolation="linear",
-                extrapolation="constant",
-            )
-
-        # If is list/tuple try to pass it to a function.
-        # If composed of lists/tuples len 2, then interpret as function of mach
-        # Otherwise interpret it as function of all 7 variables
-        # This reuses Function's parser and then feeds back into this same pipeline.
-        if isinstance(input_data, (list, tuple)):
-            if all(
-                isinstance(item, (list, tuple)) and (len(item) == 2 or len(item) == 8)
-                for item in input_data
-            ):
-                try:
-                    return self.__process_drag_input(
-                        Function(list(input_data)), coeff_name
-                    )
-                except (TypeError, ValueError) as e:
-                    raise ValueError(
-                        f"Invalid list/tuple format for {coeff_name}. Expected "
-                        "a list of [mach, coefficient] pairs or a list of "
-                        "[alpha, beta, mach, reynolds, pitch_rate, yaw_rate, "
-                        "roll_rate, coefficient] entries."
-                    ) from e
-
-        raise TypeError(
-            f"Invalid input for {coeff_name}: must be int, float, CSV file path, "
-            "Function, or callable."
-        )
-
-    def __load_rocket_drag_csv(self, file_path, coeff_name):  # pylint: disable=too-many-statements,import-outside-toplevel
-        """Load Rocket drag CSV into a 7D Function.
-
-        Supports either headerless two-column (mach, coefficient) tables or
-        header-based multi-variable CSV tables.
-        """
-        independent_vars = [
-            "alpha",
-            "beta",
-            "mach",
-            "reynolds",
-            "pitch_rate",
-            "yaw_rate",
-            "roll_rate",
-        ]
-
-        def _is_numeric(value):
-            try:
-                float(value)
-                return True
-            except (TypeError, ValueError):
-                try:
-                    int(value)
-                    return True
-                except (TypeError, ValueError):
-                    return False
-
-        try:
-            with open(file_path, mode="r") as file:
-                reader = csv.reader(file)
-                first_row = next(reader)
-        except (FileNotFoundError, IOError) as e:
-            raise ValueError(f"Error reading {coeff_name} CSV file: {e}") from e
-        except StopIteration as e:
-            raise ValueError(f"Invalid or empty CSV file for {coeff_name}.") from e
-
-        if not first_row:
-            raise ValueError(f"Invalid or empty CSV file for {coeff_name}.")
-
-        is_headerless_two_column = len(first_row) == 2 and all(
-            _is_numeric(cell) for cell in first_row
-        )
-
-        if is_headerless_two_column:
-            csv_func = Function(
-                file_path,
-                interpolation="linear",
-                extrapolation="constant",
-            )
-
-            def mach_wrapper(
-                _alpha,
-                _beta,
-                mach,
-                _reynolds,
-                _pitch_rate,
-                _yaw_rate,
-                _roll_rate,
-            ):
-                return csv_func(mach)
-
-            return Function(
-                mach_wrapper,
-                independent_vars,
-                [coeff_name],
-                interpolation="linear",
-                extrapolation="constant",
-            )
-
-        header = [column.strip() for column in first_row]
-        present_columns = [col for col in independent_vars if col in header]
-
-        invalid_columns = [col for col in header[:-1] if col not in independent_vars]
-        if invalid_columns:
-            raise ValueError(
-                f"Invalid independent variable(s) in {coeff_name} CSV: "
-                f"{invalid_columns}. Valid options are: {independent_vars}."
-            )
-
-        if header[-1] in independent_vars:
-            raise ValueError(
-                f"Last column in {coeff_name} CSV must be the coefficient "
-                "value, not an independent variable."
-            )
-
-        if not present_columns:
-            raise ValueError(f"No independent variables found in {coeff_name} CSV.")
-
-        ordered_present_columns = [
-            col for col in header[:-1] if col in independent_vars
-        ]
-
-        csv_func = Function.from_regular_grid_csv(
-            file_path,
-            ordered_present_columns,
-            coeff_name,
-            extrapolation="constant",
-        )
-        if csv_func is None:
-            csv_func = Function(
-                file_path,
-                interpolation="linear",
-                extrapolation="constant",
-            )
-
-        def wrapper(alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate):
-            args_by_name = {
-                "alpha": alpha,
-                "beta": beta,
-                "mach": mach,
-                "reynolds": reynolds,
-                "pitch_rate": pitch_rate,
-                "yaw_rate": yaw_rate,
-                "roll_rate": roll_rate,
-            }
-            selected_args = [args_by_name[col] for col in ordered_present_columns]
-            return csv_func(*selected_args)
-
-        return Function(
-            wrapper,
-            independent_vars,
-            [coeff_name],
-            interpolation="linear",
-            extrapolation="constant",
-        )

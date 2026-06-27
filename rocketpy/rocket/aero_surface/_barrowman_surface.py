@@ -27,6 +27,11 @@ class _BarrowmanSurface(LinearGenericSurface):
     ``self.roll_parameters = [clf_delta, cld_omega, cant_angle_rad]``.
     """
 
+    # Geometry-defined Barrowman surfaces are axisymmetric by construction
+    # (``cQ_beta = -cL_alpha``, etc.), so they contribute identically to the
+    # pitch and yaw planes. The individual ``Fin`` overrides this back to False.
+    is_axisymmetric = True
+
     @staticmethod
     def _beta(mach):
         """Prandtl-Glauert compressibility factor used to correct subsonic
@@ -115,6 +120,7 @@ class _BarrowmanSurface(LinearGenericSurface):
         return AeroCoefficient(
             func_of_mach,
             depends_on=("mach",),
-            independent_vars=self.independent_vars,
+            unsteady_aero=self._unsteady_aero,
+            control_variables=self.control_variables,
             name=name,
         )

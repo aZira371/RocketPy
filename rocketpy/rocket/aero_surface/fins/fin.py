@@ -91,6 +91,12 @@ class Fin(_BaseFin):
         damping coefficient and the cant angle in radians.
     """
 
+    # A single fin contributes unequally to the pitch and yaw planes
+    # (``cL_alpha`` ~ sin^2(phi), ``cQ_beta`` ~ cos^2(phi)), so it is not
+    # axisymmetric on its own. A complete, evenly spaced set may still be
+    # axisymmetric collectively, which the rocket's numeric check resolves.
+    is_axisymmetric = False
+
     def __init__(
         self,
         angular_position,
@@ -296,7 +302,12 @@ class Fin(_BaseFin):
         sin_delta = math.sin(delta)
         cos_delta = math.cos(delta)
 
-        # Rotation about body Z by angular position
+        # The body -> fin change of basis is composed right-to-left as
+        # ``R_delta @ R_phi @ R_pi`` (R_pi first, R_delta last). Each factor
+        # therefore acts on the coordinates produced by the factors to its right,
+        # i.e. in the *current* (partially rotated) frame, not the body frame.
+
+        # Roll by the angular position, about the rocket longitudinal axis.
         R_phi = Matrix(
             [
                 [cos_phi, -sin_phi, 0],
@@ -305,7 +316,12 @@ class Fin(_BaseFin):
             ]
         )
 
-        # Cant rotation about body Y
+        # Cant rotation about the fin **span (y) axis**. Because R_delta is the
+        # leftmost factor, it acts on coordinates already in the rolled
+        # uncanted-fin frame, so it rotates about that frame's y axis (the fin's
+        # own root-to-tip direction) -- NOT body Y, with which it coincides only
+        # at angular_position = 0. This is what makes each fin cant about its own
+        # span; using body Y (``R_uncanted @ R_delta``) would be wrong.
         R_delta = Matrix(
             [
                 [cos_delta, 0, -sin_delta],
@@ -314,7 +330,9 @@ class Fin(_BaseFin):
             ]
         )
 
-        # 180 flip about Y to align fin leading/trailing edge
+        # 180 flip about Y so the uncanted fin z axis points leading -> trailing
+        # edge (toward the tail, i.e. -body z), with x completing a right-handed
+        # frame. Proper rotation (det +1), not a reflection.
         R_pi = Matrix(
             [
                 [-1, 0, 0],
@@ -323,7 +341,7 @@ class Fin(_BaseFin):
             ]
         )
 
-        # Uncanted body to fin, then apply cant
+        # Uncanted body -> fin, then apply the cant in the fin span frame.
         R_uncanted = R_phi @ R_pi
         R_body_to_fin = R_delta @ R_uncanted
 

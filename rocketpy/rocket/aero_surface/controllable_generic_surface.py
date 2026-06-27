@@ -1,9 +1,4 @@
-from rocketpy.plots.aero_surface_plots import _GenericSurfacePlots
-from rocketpy.prints.aero_surface_prints import _GenericSurfacePrints
-from rocketpy.rocket.aero_surface.generic_surface import (
-    BASE_INDEPENDENT_VARS,
-    GenericSurface,
-)
+from rocketpy.rocket.aero_surface.generic_surface import GenericSurface
 
 
 class ControllableGenericSurface(GenericSurface):
@@ -61,9 +56,9 @@ class ControllableGenericSurface(GenericSurface):
         """
         # These must be set before ``super().__init__`` so coefficient
         # processing (arity, CSV validation) and the derived-cp accessors see
-        # the extended variable list and the current control values.
+        # the extended variable list (via the ``independent_vars`` property,
+        # which appends ``control_variables``) and the current control values.
         self.control_variables = list(controls)
-        self.independent_vars = BASE_INDEPENDENT_VARS + self.control_variables
         self.control_state = {name: 0.0 for name in self.control_variables}
 
         super().__init__(
@@ -73,9 +68,7 @@ class ControllableGenericSurface(GenericSurface):
             center_of_pressure=center_of_pressure,
             name=name,
         )
-
-        self.prints = _GenericSurfacePrints(self)
-        self.plots = _GenericSurfacePlots(self)
+        # ``self.prints``/``self.plots`` are the generic ones wired by the base.
 
     def _coefficient_arguments(
         self,

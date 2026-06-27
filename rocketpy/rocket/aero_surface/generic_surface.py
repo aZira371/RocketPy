@@ -1,25 +1,16 @@
 import copy
-import csv
 import math
 
 import numpy as np
 
 from rocketpy.mathutils import Function
 from rocketpy.mathutils.vector_matrix import Matrix, Vector
-from rocketpy.rocket.aero_surface.aero_coefficient import AeroCoefficient
-
-# Single source of truth for the coefficient independent variables. Subclasses
-# (e.g. ControllableGenericSurface, or the alpha_dot/beta_dot extension) append
-# extra axes to this base via ``self.independent_vars``.
-BASE_INDEPENDENT_VARS = [
-    "alpha",
-    "beta",
-    "mach",
-    "reynolds",
-    "pitch_rate",
-    "yaw_rate",
-    "roll_rate",
-]
+from rocketpy.plots.aero_surface_plots import _GenericSurfacePlots
+from rocketpy.prints.aero_surface_prints import _GenericSurfacePrints
+from rocketpy.rocket.aero_surface.aero_coefficient import (
+    AeroCoefficient,
+    build_independent_vars,
+)
 
 
 class GenericSurface:
@@ -27,6 +18,14 @@ class GenericSurface:
     coefficients. The coefficients can be nonlinear functions of the angle of
     attack, sideslip angle, Mach number, Reynolds number, pitch rate, yaw rate
     and roll rate."""
+
+    #: Whether this surface contributes identically to the pitch and yaw planes
+    #: *by construction*. Conservatively ``False`` for a generic surface (its
+    #: coefficients may differ between planes); the built-in axisymmetric
+    #: surfaces override it to ``True``. The rocket uses it to skip the numeric
+    #: pitch/yaw axisymmetry check when every surface is symmetric by
+    #: construction.
+    is_axisymmetric = False
 
     def __init__(
         self,
@@ -49,6 +48,13 @@ class GenericSurface:
         contain at least one of the following: "alpha", "beta", "mach",
         "reynolds", "pitch_rate", "yaw_rate" and "roll_rate". The
         independent variable columns can be provided in any order.
+
+        The angular-rate inputs ("pitch_rate", "yaw_rate", "roll_rate") are the
+        conventional **non-dimensional reduced rates**, ``q* = q * L_ref / (2 * V)``
+        (and likewise for ``r``/``p``), matching how published and tool-generated
+        aerotables (Missile DATCOM, OpenVSP, CFD/wind-tunnel data) tabulate rate
+        derivatives. Provide coefficient tables against the reduced rates, not the
+        raw body rates in rad/s.
 
         See Also
         --------
@@ -99,16 +105,24 @@ class GenericSurface:
             unaffected. Default is False.
         """
 
-        # Independent variables the coefficients depend on. Subclasses may set
-        # this (with extra axes appended) before calling ``super().__init__``.
-        # When ``unsteady_aero`` is enabled, the time-derivatives of the flow
-        # angles (``alpha_dot``, ``beta_dot``) are appended as extra axes
-        # (defaulting to 0 at runtime, so existing tables are unaffected).
+        # The independent variables of the coefficients are derived (see the
+        # ``independent_vars`` property) from ``unsteady_aero`` and, for
+        # subclasses, ``control_variables``. When ``unsteady_aero`` is enabled,
+        # the time-derivatives of the flow angles (``alpha_dot``, ``beta_dot``)
+        # become extra axes (defaulting to 0 at runtime, so existing tables are
+        # unaffected). Subclasses that add externally-supplied axes set
+        # ``control_variables`` before calling ``super().__init__``.
         self._unsteady_aero = unsteady_aero
-        if not hasattr(self, "independent_vars"):
-            self.independent_vars = list(BASE_INDEPENDENT_VARS)
-            if unsteady_aero:
-                self.independent_vars += ["alpha_dot", "beta_dot"]
+        # Externally-supplied axes (e.g. control deflections). Subclasses set
+        # this before ``super().__init__``; defaults to none for plain surfaces.
+        self.control_variables = getattr(self, "control_variables", ())
+        # Ordered independent variables accepted by every coefficient: the seven
+        # base axes, plus ``alpha_dot``/``beta_dot`` when ``unsteady_aero`` is
+        # enabled (integrator-supplied), plus any ``control_variables`` a
+        # subclass appended (externally supplied). Fixed at construction.
+        self.independent_vars = build_independent_vars(
+            self._unsteady_aero, self.control_variables
+        )
 
         self.reference_area = reference_area
         self.reference_length = reference_length
@@ -125,11 +139,21 @@ class GenericSurface:
         self._check_coefficients(coefficients, default_coefficients)
         coefficients = self._complete_coefficients(coefficients, default_coefficients)
         for coeff, coeff_value in coefficients.items():
-            value = self._process_input(coeff_value, coeff)
+            value = AeroCoefficient(
+                coeff_value,
+                unsteady_aero=self._unsteady_aero,
+                control_variables=self.control_variables,
+                name=coeff,
+            )
             setattr(self, coeff, value)
 
         self.evaluate_coefficients()
         self._evaluate_derived_coefficients()
+
+        # Reporting layers. Subclasses override these with their own (more
+        # specific) prints/plots after calling ``super().__init__``.
+        self.prints = _GenericSurfacePrints(self)
+        self.plots = _GenericSurfacePlots(self)
 
     @property
     def force_application_point(self):
@@ -141,6 +165,27 @@ class GenericSurface:
         whole cp offset into the moment coefficients instead.
         """
         return Vector([self.cpx, self.cpy, self.cpz])
+
+    def info(self):
+        """Prints a summary of the surface's geometry and aerodynamic
+        coefficients. Subclasses override this with surface-specific summaries.
+
+        Returns
+        -------
+        None
+        """
+        self.prints.geometry()
+        self.prints.coefficients()
+
+    def all_info(self):
+        """Prints and plots all available information of the surface.
+
+        Returns
+        -------
+        None
+        """
+        self.prints.all()
+        self.plots.all()
 
     def evaluate_coefficients(self):
         """Hook for subclasses to (re)populate the aerodynamic coefficient
@@ -202,10 +247,16 @@ class GenericSurface:
         local_cpz = self.force_application_point[2]
 
         def _cp_z(force_slope, moment_slope):
+            # Recover the center of pressure from a force slope and its matching
+            # moment slope, as a Function of Mach.
             def cp_z(mach):
                 slope = force_slope.get_value_opt(mach)
+                # No force at this Mach -> the cp is undefined; fall back to the
+                # geometric application point so this surface contributes zero
+                # weight to the force-weighted cp average.
                 if slope == 0:
                     return local_cpz
+                # cp = application point - (moment slope / force slope) * L_ref.
                 return (
                     local_cpz
                     - moment_slope.get_value_opt(mach) / slope * reference_length
@@ -217,9 +268,9 @@ class GenericSurface:
         self.lift_coefficient_derivative = cL_alpha
         self.center_of_pressure_z = _cp_z(cL_alpha, cm_alpha)
 
-        # Yaw plane. The side-force slope is sign-adjusted (``-cQ_beta``) so that
-        # an axisymmetric surface yields the same signed weight as the pitch
-        # plane, making the two planes' margins coincide when symmetric.
+        # Yaw plane. The side-force slope is sign-adjusted (``-cQ_beta``) so
+        # that an axisymmetric surface yields the same signed weight as the
+        # pitch plane, making the two planes' margins coincide when symmetric.
         self.side_coefficient_derivative = -cQ_beta
         self.center_of_pressure_z_yaw = _cp_z(cQ_beta, cn_beta)
 
@@ -366,11 +417,11 @@ class GenericSurface:
         reynolds : float
             Reynolds number.
         pitch_rate : float
-            Pitch rate in radians per second.
+            Non-dimensional (reduced) pitch rate, ``q * L_ref / (2 * V)``.
         yaw_rate : float
-            Yaw rate in radians per second.
+            Non-dimensional (reduced) yaw rate, ``r * L_ref / (2 * V)``.
         roll_rate : float
-            Roll rate in radians per second.
+            Non-dimensional (reduced) roll rate, ``p * L_ref / (2 * V)``.
 
         Returns
         -------
@@ -497,6 +548,17 @@ class GenericSurface:
         alpha = np.arctan2(stream_velocity[1], stream_velocity[2])
         beta = np.arctan2(stream_velocity[0], stream_velocity[2])
 
+        # Non-dimensionalize the body angular rates into the conventional reduced
+        # rates (e.g. ``q* = q * L_ref / (2 * V)``) before evaluating the
+        # coefficients, so coefficient tables follow the standard aerotable
+        # convention (Missile DATCOM, OpenVSP, CFD/wind-tunnel data tabulate rate
+        # derivatives against the reduced rates). The factor is 0 at zero airspeed
+        # (pad/static) to avoid division by zero; there is no aerodynamic damping
+        # there anyway.
+        reduced_rate_factor = (
+            self.reference_length / (2 * stream_speed) if stream_speed > 0 else 0.0
+        )
+
         # Compute aerodynamic forces and moments
         lift, side, drag, pitch, yaw, roll = self._compute_from_coefficients(
             rho,
@@ -505,9 +567,9 @@ class GenericSurface:
             beta,
             stream_mach,
             reynolds,
-            omega[0],  # q
-            omega[1],  # r
-            omega[2],  # p
+            omega[0] * reduced_rate_factor,  # q*  reduced pitch rate
+            omega[1] * reduced_rate_factor,  # r*  reduced yaw rate
+            omega[2] * reduced_rate_factor,  # p*  reduced roll rate
             alpha_dot,
             beta_dot,
         )
@@ -515,11 +577,7 @@ class GenericSurface:
         # Conversion from the aerodynamic frame to the body frame. This is the
         # direction cosine matrix (DCM) that expresses the aerodynamic-frame
         # force components in the body frame, i.e. rotations by ``-alpha`` about
-        # x and ``+beta`` about y. Using the opposite-sign "vector rotation"
-        # matrices is incorrect: it leaves the result effectively in the
-        # aerodynamic frame, flipping the transverse components of any force that
-        # has a drag part (see RocketPy issue #932). Surfaces with no drag (the
-        # Barrowman lift/side surfaces) differ only in the small axial term.
+        # x and ``+beta`` about y.
         rotation_matrix = Matrix(
             [
                 [1, 0, 0],
@@ -539,100 +597,3 @@ class GenericSurface:
         M1, M2, M3 = Vector([pitch, yaw, roll]) + (cp ^ Vector([R1, R2, R3]))
 
         return R1, R2, R3, M1, M2, M3
-
-    def _process_input(self, input_data, coeff_name):
-        """Process a coefficient input into an :class:`AeroCoefficient`.
-
-        Accepts a number, a callable, a :class:`Function`, or a path to a CSV
-        file, storing the coefficient at its intrinsic dimensionality (its
-        ``depends_on``) rather than forcing it into a full
-        ``len(self.independent_vars)``-D ``Function``. See
-        :class:`AeroCoefficient`.
-
-        Parameters
-        ----------
-        input_data : int, float, str, callable, or Function
-            Input data to be processed.
-        coeff_name : str
-            Name of the coefficient being processed for error reporting.
-
-        Returns
-        -------
-        AeroCoefficient
-            Callable over the full ``self.independent_vars`` argument tuple.
-        """
-        return AeroCoefficient.from_input(
-            input_data,
-            coeff_name,
-            self.independent_vars,
-            csv_loader=self.__load_generic_surface_csv,
-        )
-
-    def __load_generic_surface_csv(self, file_path, coeff_name):  # pylint: disable=too-many-statements,import-outside-toplevel
-        """Load a GenericSurface coefficient CSV at minimal dimension.
-
-        This loader expects header-based CSV data with one or more independent
-        variables among ``self.independent_vars`` (the seven base variables,
-        plus any extra axes added by subclasses such as control deflections).
-
-        Returns
-        -------
-        tuple
-            ``(function, depends_on)`` where ``function`` is a low-dimensional
-            ``Function`` over the present columns and ``depends_on`` lists those
-            columns. Consumed by :meth:`AeroCoefficient.from_input`.
-        """
-        independent_vars = list(self.independent_vars)
-
-        try:
-            with open(file_path, mode="r") as file:
-                reader = csv.reader(file)
-                header = next(reader)
-        except (FileNotFoundError, IOError) as e:
-            raise ValueError(f"Error reading {coeff_name} CSV file: {e}") from e
-        except StopIteration as e:
-            raise ValueError(f"Invalid or empty CSV file for {coeff_name}.") from e
-
-        if not header:
-            raise ValueError(f"Invalid or empty CSV file for {coeff_name}.")
-
-        header = [column.strip() for column in header]
-        present_columns = [col for col in independent_vars if col in header]
-
-        invalid_columns = [col for col in header[:-1] if col not in independent_vars]
-        if invalid_columns:
-            raise ValueError(
-                f"Invalid independent variable(s) in {coeff_name} CSV: "
-                f"{invalid_columns}. Valid options are: {independent_vars}."
-            )
-
-        if header[-1] in independent_vars:
-            raise ValueError(
-                f"Last column in {coeff_name} CSV must be the coefficient"
-                " value, not an independent variable."
-            )
-
-        if not present_columns:
-            raise ValueError(f"No independent variables found in {coeff_name} CSV.")
-
-        ordered_present_columns = [
-            col for col in header[:-1] if col in independent_vars
-        ]
-
-        csv_func = Function.from_regular_grid_csv(
-            file_path,
-            ordered_present_columns,
-            coeff_name,
-            extrapolation="natural",
-        )
-        if csv_func is None:
-            csv_func = Function(
-                file_path,
-                interpolation="linear",
-                extrapolation="natural",
-            )
-
-        # The CSV columns may appear in any order; AeroCoefficient maps the full
-        # argument tuple to ``ordered_present_columns`` order, so the stored
-        # Function is queried directly at its own (minimal) dimensionality.
-        return csv_func, ordered_present_columns
