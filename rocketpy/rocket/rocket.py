@@ -5,7 +5,8 @@ from typing import Iterable
 
 import numpy as np
 
-from rocketpy.control.controller import Controller
+from rocketpy.control.air_brakes_controller import AirBrakesController
+from rocketpy.control.surface_controller import SurfaceController
 from rocketpy.mathutils.function import Function
 from rocketpy.mathutils.vector_matrix import Matrix, Vector
 from rocketpy.motors.empty_motor import EmptyMotor
@@ -1599,7 +1600,7 @@ class Rocket:
         buttons and individual-fin roll). For controllable vehicle coefficients
         (deflection axes), build a
         :class:`ControllableGenericSurface` and add it with
-        :meth:`add_surfaces` / ``add_controllable_surface`` instead.
+        :meth:`add_surfaces` / :meth:`add_controllable_surface` instead.
         """
         if reference_position is None:
             reference_position = self.center_of_dry_mass_position
@@ -1612,6 +1613,82 @@ class Rocket:
         )
         self.add_surfaces(surface, reference_position)
         return surface
+
+    def add_controllable_surface(
+        self,
+        surface,
+        position,
+        controller_function,
+        sampling_rate,
+        context=None,
+        controller_name=None,
+        controlled_objects_name=None,
+        needs=None,
+        enabled=True,
+        disable_on=None,
+        enable_on=None,
+    ):
+        """Add controllable surface(s) to the rocket and register a
+        :class:`SurfaceController` driving them.
+
+        The surface(s) join ``aerodynamic_surfaces`` like any other surface
+        (their forces and moments are summed in the equations of motion), and
+        the controller executes at ``sampling_rate`` during flight, applying
+        control actions via ``surface.set_control``. The control state of each
+        surface is automatically recorded in the controller's
+        ``control_history`` and reset between flights.
+
+        Parameters
+        ----------
+        surface : ControllableGenericSurface or list
+            Controllable surface(s) to add.
+        position : int, float, tuple or list
+            Position(s) of the surface(s) in the rocket's user coordinate
+            system; same forms as :meth:`add_surfaces` (a list of positions
+            for a list of surfaces).
+        controller_function : callable
+            Control logic with signature ``controller_function(**kwargs)``;
+            see :class:`Controller` for the available keyword arguments.
+        sampling_rate : float
+            Rate in hertz at which the controller executes.
+        context : dict, optional
+            Initial persistent controller state.
+        controller_name : str, optional
+            Controller name; defaults to ``"<surface name> Controller"``.
+        controlled_objects_name : str or list of str, optional
+            Friendly name(s) under which the surface(s) are exposed in the
+            controller function kwargs.
+        needs : list or frozenset of str or None, optional
+            Expensive simulation values the controller function accesses;
+            see :class:`Controller`.
+        enabled : bool, optional
+            Initial enabled state of the controller. Defaults to ``True``.
+        disable_on, enable_on : str or int or float or callable, optional
+            Automatic disable/enable conditions; see :class:`Controller`.
+
+        Returns
+        -------
+        SurfaceController
+            The controller created and registered on the rocket.
+        """
+        self.add_surfaces(surface, position)
+        if controller_name is None:
+            first = surface[0] if isinstance(surface, (list, tuple)) else surface
+            controller_name = f"{getattr(first, 'name', 'Surface')} Controller"
+        controller = SurfaceController(
+            controller_function,
+            surface,
+            sampling_rate,
+            context=context,
+            name=controller_name,
+            controlled_objects_name=controlled_objects_name,
+            needs=needs,
+            enabled=enabled,
+            disable_on=disable_on,
+            enable_on=enable_on,
+        )
+        self._add_controllers(controller)
+        return controller
 
     def _add_controllers(self, controllers):
         """Adds a controller to the rocket.
@@ -2399,6 +2476,8 @@ class Rocket:
 
         def controller_wrapper(**kwargs):
             if accepts_var_kwargs:
+                # Hybrid signatures like ``f(time, **kwargs)``: every value is
+                # forwarded by keyword, so positional params bind by name.
                 return orig_controller(**kwargs)
 
             # Legacy positional signature expected. Build positional args in
@@ -2431,10 +2510,17 @@ class Rocket:
 
             return orig_controller(*legacy_args)
 
-        _controller = Controller(
-            controller_function=controller_wrapper,
-            controlled_objects=air_brakes,
-            controlled_objects_name="air_brakes",
+        # Pure ``**kwargs`` functions need no compatibility wrapper.
+        pass_through = (
+            accepts_var_kwargs
+            and positional_parameter_count == 0
+            and not accepts_var_args
+        )
+        _controller = AirBrakesController(
+            controller_function=(
+                orig_controller if pass_through else controller_wrapper
+            ),
+            air_brakes=air_brakes,
             sampling_rate=sampling_rate,
             context=controller_context,
             name=controller_name,

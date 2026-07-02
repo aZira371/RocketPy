@@ -1,5 +1,10 @@
 from ._logging import enable_logging, logger, set_log_level
-from .control import ControlledObject, Controller
+from .control import (
+    AirBrakesController,
+    ControlledObject,
+    Controller,
+    SurfaceController,
+)
 from .environment import Environment, EnvironmentAnalysis
 from .mathutils import (
     Function,

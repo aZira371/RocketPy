@@ -91,3 +91,24 @@ class _ControllerPrints:
         self.controller_function()
         self.controlled_objects()
         self.control_history()
+
+
+class _AirBrakesControllerPrints(_ControllerPrints):
+    """Prints for AirBrakesController, adding a deployment-level summary."""
+
+    def deployment_level(self):
+        """Prints a summary of the recorded deployment level."""
+        samples = self.controller.control_history.get("air_brakes", {}).get(
+            "deployment_level", []
+        )
+        if not samples:
+            print("No recorded deployment level history.")
+            return
+        values = [sample[1] for sample in samples]
+        print(f"Final deployment level: {values[-1]:.4g}")
+        print(f"Maximum deployment level: {max(values):.4g}")
+
+    def all(self):
+        """Prints all information about the air brakes controller."""
+        super().all()
+        self.deployment_level()

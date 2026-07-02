@@ -76,3 +76,48 @@ class _ControllerPlots:
         None
         """
         self.control_history()
+
+
+class _AirBrakesControllerPlots(_ControllerPlots):
+    """Plots for AirBrakesController."""
+
+    def deployment_level_curve(self, *, filename=None):
+        """Plots the recorded deployment level as a function of time.
+
+        Parameters
+        ----------
+        filename : str or None, optional
+            Path to save the figure. If None, the figure is shown instead.
+
+        Returns
+        -------
+        None
+        """
+        samples = self.controller.control_history.get("air_brakes", {}).get(
+            "deployment_level", []
+        )
+        if not samples:
+            print(
+                "No recorded deployment level history - run a Flight with "
+                "this controller first."
+            )
+            return
+        times = [sample[0] for sample in samples]
+        values = [sample[1] for sample in samples]
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(times, values)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Deployment Level")
+        ax.set_title(f"Deployment level - {self.controller.name}")
+        ax.grid(True)
+        fig.tight_layout()
+        show_or_save_plot(filename)
+
+    def all(self):
+        """Plots all available air brakes controller plots.
+
+        Returns
+        -------
+        None
+        """
+        self.deployment_level_curve()
