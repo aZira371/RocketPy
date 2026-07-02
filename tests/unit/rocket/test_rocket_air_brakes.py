@@ -86,9 +86,7 @@ class TestAddAirBrakesCompatibility:
 
     def test_initial_observed_variables_deprecated(self, calisto_motorless):
         with pytest.warns(DeprecationWarning, match="initial_observed_variables"):
-            add_air_brakes(
-                calisto_motorless, initial_observed_variables=[(0, 0, 0)]
-            )
+            add_air_brakes(calisto_motorless, initial_observed_variables=[(0, 0, 0)])
 
 
 class TestAddControllableSurface:

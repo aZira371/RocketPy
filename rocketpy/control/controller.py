@@ -576,7 +576,9 @@ class Controller(Event):
         return controller
 
     @classmethod
-    def _construct(cls, controller_function, controlled_objects, sampling_rate, **kwargs):
+    def _construct(
+        cls, controller_function, controlled_objects, sampling_rate, **kwargs
+    ):
         """Constructor hook for ``from_dict``; subclasses whose ``__init__``
         renames or drops parameters override this."""
         return cls(controller_function, controlled_objects, sampling_rate, **kwargs)

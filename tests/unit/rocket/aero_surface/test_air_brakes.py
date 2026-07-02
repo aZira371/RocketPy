@@ -117,6 +117,6 @@ class TestSerialization:
         assert rebuilt.initial_deployment_level == 0.2
         assert rebuilt.deployment_level == 0.2
         for mach in np.linspace(0.1, 0.9, 5):
-            assert rebuilt.drag_coefficient.get_value_opt(
-                0.5, mach
-            ) == pytest.approx(air_brakes.drag_coefficient.get_value_opt(0.5, mach))
+            assert rebuilt.drag_coefficient.get_value_opt(0.5, mach) == pytest.approx(
+                air_brakes.drag_coefficient.get_value_opt(0.5, mach)
+            )

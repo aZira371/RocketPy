@@ -420,9 +420,7 @@ class _FlightPrints:
 
             print(f"\tTriggered Count: {len(controller.triggered_times)}")
             if len(controller.triggered_times) > 0:
-                print(
-                    f"\tFirst Activation Time: {controller.triggered_times[0]:.3f} s"
-                )
+                print(f"\tFirst Activation Time: {controller.triggered_times[0]:.3f} s")
                 print(f"\tLast Activation Time: {controller.triggered_times[-1]:.3f} s")
 
             print(f"\tCallback Log Entries: {len(controller.callback_log)}")

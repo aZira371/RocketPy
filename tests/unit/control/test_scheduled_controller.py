@@ -34,9 +34,7 @@ class TestScheduleNormalization:
     def test_flat_schedule_with_multiple_objects_rejected(self):
         surfaces = [make_surface("a"), make_surface("b")]
         with pytest.raises(ValueError, match="exactly one"):
-            ScheduledController(
-                {"deflection": [(0, 0.0)]}, surfaces, sampling_rate=10
-            )
+            ScheduledController({"deflection": [(0, 0.0)]}, surfaces, sampling_rate=10)
 
     def test_nested_schedule_and_source_forms(self):
         surfaces = [make_surface("a"), make_surface("b")]
@@ -85,9 +83,7 @@ class TestReplay:
         surface = make_surface()
 
         def law(**kwargs):
-            kwargs["controlled_objects"].set_control(
-                "deflection", 0.1 * kwargs["time"]
-            )
+            kwargs["controlled_objects"].set_control("deflection", 0.1 * kwargs["time"])
 
         source = Controller(law, surface, sampling_rate=10)
         for time in (1.0, 2.0, 3.0):
@@ -101,9 +97,7 @@ class TestReplay:
             assert surface.get_control("deflection") == pytest.approx(0.1 * time)
 
     def test_from_controller_without_history_rejected(self):
-        source = Controller(
-            lambda **kwargs: None, make_surface(), sampling_rate=10
-        )
+        source = Controller(lambda **kwargs: None, make_surface(), sampling_rate=10)
         with pytest.raises(ValueError, match="no recorded control history"):
             ScheduledController.from_controller(source)
 
@@ -113,9 +107,7 @@ class TestSerializationFallback:
         surface = make_surface()
 
         def law(**kwargs):
-            kwargs["controlled_objects"].set_control(
-                "deflection", 0.1 * kwargs["time"]
-            )
+            kwargs["controlled_objects"].set_control("deflection", 0.1 * kwargs["time"])
 
         controller = Controller(law, surface, sampling_rate=10)
         for time in (1.0, 2.0, 3.0):

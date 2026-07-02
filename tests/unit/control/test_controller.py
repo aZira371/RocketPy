@@ -3,7 +3,7 @@ kwargs, automatic control-state tracking, and the reset lifecycle."""
 
 import pytest
 
-from rocketpy import ControlledObject, Controller, ControllableGenericSurface
+from rocketpy import ControllableGenericSurface, ControlledObject, Controller
 from rocketpy.simulation.events.event import Event
 
 STATE = [0.0] * 13
@@ -131,9 +131,7 @@ class TestControllerCallback:
 class TestControlStateTracking:
     def test_control_history_records_every_execution(self):
         def controller_function(**kwargs):
-            kwargs["controlled_objects"].set_control(
-                "deflection", 0.1 * kwargs["time"]
-            )
+            kwargs["controlled_objects"].set_control("deflection", 0.1 * kwargs["time"])
 
         controller, _ = make_controller(controller_function=controller_function)
         controller(time=1.0, state=STATE)
@@ -217,9 +215,7 @@ class TestResetLifecycle:
             kwargs["controlled_objects"].set_control("deflection", 1.0)
             return "entry"
 
-        controller, surface = make_controller(
-            controller_function=controller_function
-        )
+        controller, surface = make_controller(controller_function=controller_function)
         controller(time=1.0, state=STATE)
         controller.reset()
 

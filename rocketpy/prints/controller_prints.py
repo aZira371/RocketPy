@@ -59,7 +59,9 @@ class _ControllerPrints:
         """Prints a summary of the recorded control history, per controlled
         object and control variable."""
         history = getattr(self.controller, "control_history", {})
-        if not any(samples for variables in history.values() for samples in variables.values()):
+        if not any(
+            samples for variables in history.values() for samples in variables.values()
+        ):
             print("No recorded control history.")
             return
         print("Recorded Control History")

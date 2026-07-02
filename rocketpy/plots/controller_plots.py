@@ -47,8 +47,7 @@ class _ControllerPlots:
         ]
         if not pairs:
             print(
-                "No recorded control history - run a Flight with this "
-                "controller first."
+                "No recorded control history - run a Flight with this controller first."
             )
             return
 

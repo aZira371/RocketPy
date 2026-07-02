@@ -137,9 +137,7 @@ def test_non_axisymmetric_rocket_splits_margins_and_warns(calisto_motorless):
     with pytest.warns(UserWarning, match="not\\s+axisymmetric"):
         ac_pitch = rocket.aerodynamic_center.get_value_opt(0.2)
 
-    assert ac_pitch != pytest.approx(
-        rocket.aerodynamic_center_yaw.get_value_opt(0.2)
-    )
+    assert ac_pitch != pytest.approx(rocket.aerodynamic_center_yaw.get_value_opt(0.2))
     assert rocket.static_margin.get_value_opt(0) != pytest.approx(
         rocket.static_margin_yaw.get_value_opt(0)
     )
