@@ -143,10 +143,9 @@ orientation. Because the weight is the normal-force slope, a zero-lift surface
 ``Rocket.aerodynamic_center``.
 
 .. note::
-   ``Rocket.cp_position`` is a **deprecated alias** for
-   ``Rocket.aerodynamic_center``. The historical "center of pressure" attribute
-   was always the aerodynamic center; the alias is kept (with a
-   ``DeprecationWarning``) for backward compatibility.
+   ``Rocket.cp_position`` is an **alias** for ``Rocket.aerodynamic_center``. The
+   historical "center of pressure" attribute was always the aerodynamic center;
+   the alias is kept for backward compatibility and convenience.
 
 Center of pressure (nonlinear)
 ------------------------------
@@ -161,17 +160,21 @@ attack/sideslip:
    x_\text{CP}(\alpha,\beta,M,Re) =
      x_\text{cdm} + c\,\frac{M_2 R_1 - M_1 R_2}{R_1^2 + R_2^2}
 
-evaluated from the Layer-1 aggregate (:math:`M = r\times F`). Unlike the AC, the
-CP **moves with incidence**. It is a :math:`0/0` limit at zero incidence and
-converges to the AC as :math:`\alpha,\beta \to 0`. This is
-:meth:`rocketpy.Rocket.center_of_pressure`.
+evaluated from the Layer-1 aggregate (:math:`M = r\times F`). Equivalently, per
+plane, :math:`x_\text{CP} = x_\text{cdm} + c\,L_\text{ref}\,C_m/C_L` (pitch) and
+:math:`+\,c\,L_\text{ref}\,C_n/C_Q` (yaw). Unlike the AC, the CP **moves with
+incidence**.
 
-To stay well-conditioned, ``center_of_pressure`` returns the aerodynamic-center
-limit below ~1° of total incidence — blended between the pitch and yaw planes by
-the direction of incidence (:meth:`rocketpy.Rocket._aerodynamic_center_limit`) —
-so it is continuous and never spikes as the rocket oscillates through zero
-incidence. The design-time travel is exposed by
-``center_of_pressure_over_alpha`` and ``center_of_pressure_over_beta``.
+The CP is a **genuinely partial quantity**: it is a :math:`0/0` limit at zero
+incidence (the normal force vanishes), undefined there, and converges to the AC
+as :math:`\alpha,\beta \to 0`. Because it plays no role in the equations of
+motion and the stability margins are correctly built on the AC (a slope, see
+Layer 3), RocketPy does **not** expose it as a dedicated method — that would
+force an arbitrary regularization of a real singularity. When the
+force-application CP is genuinely wanted (e.g. comparing against wind-tunnel or
+CFD CP-vs-:math:`\alpha` data), it is reconstructed on demand from the aggregate
+coefficients :meth:`rocketpy.Rocket.aerodynamic_coefficients_full` using the
+relation above, with the caller deciding how to treat the zero-incidence limit.
 
 Pitch and yaw planes
 --------------------
@@ -187,8 +190,7 @@ They coincide for an axisymmetric rocket; ``Rocket.is_axisymmetric`` reports
 whether they agree (to caliber tolerance) and
 :meth:`rocketpy.Rocket.evaluate_center_of_pressure` warns when they do not, since
 the scalar ``static_margin``/``stability_margin`` then describe the pitch plane
-only. The **nonlinear** CP needs no such split — evaluated at the actual combined
-incidence, a single axial location already captures both planes.
+only, and the ``*_yaw`` counterparts expose the yaw plane.
 
 Layer 3 — Static and stability margins
 ======================================
@@ -213,23 +215,36 @@ incompressible (:math:`M=0`) limit, a function of time; the stability margin
 (:meth:`rocketpy.Rocket.evaluate_stability_margin`) is a function of Mach and
 time. The ``*_yaw`` counterparts use ``aerodynamic_center_yaw``.
 
-**Realized (center-of-pressure) margin.** Built on the nonlinear CP at the
-actual flight incidence, it reflects how the stability reference travels with
-:math:`\alpha,\beta` (and combines the planes for a non-axisymmetric rocket).
-
-At the :class:`rocketpy.Flight` level:
-
-- ``Flight.stability_margin`` evaluates the **linear** margin along the realized
-  Mach and time — smooth, conventional, and the source of
-  ``initial_stability_margin`` / ``out_of_rail_stability_margin`` /
-  ``min_stability_margin`` / ``max_stability_margin``;
-- ``Flight.realized_stability_margin`` evaluates the **nonlinear** CP at the
-  realized :math:`\alpha,\beta,M,Re`, falling back to the linear margin only at
-  negligible dynamic pressure (rail, rest, apogee), where the realized incidence
-  is meaningless.
+At the :class:`rocketpy.Flight` level, ``Flight.stability_margin`` (and
+``stability_margin_yaw``) evaluates the linear margin along the realized Mach and
+time — smooth, conventional, and the source of ``initial_stability_margin`` /
+``out_of_rail_stability_margin`` / ``min_stability_margin`` /
+``max_stability_margin``.
 
 A positive margin (stability reference behind the center of mass) is the classic
 passive-stability condition.
+
+.. note::
+   **Nonlinear (large-incidence) static stability.** For tabulated
+   :class:`rocketpy.GenericSurface` coefficients that are nonlinear in
+   :math:`\alpha`, the stability reference -- the *local neutral point*, the AC
+   re-linearized at the flown incidence -- migrates with angle of attack,
+
+   .. math::
+
+      x_\text{NP}(\alpha,\beta,M) = x_\text{cdm}
+        + c\,L_\text{ref}\,\frac{\partial C_m/\partial\alpha}
+                                {\partial C_L/\partial\alpha},
+
+   which (unlike the singular force-application CP :math:`-C_m/C_N`) is well
+   conditioned at every incidence and isolates the stability-relevant part of
+   the CP travel. It is reconstructed on demand from
+   :meth:`rocketpy.Rocket.aerodynamic_coefficients_full` by a central finite
+   difference in :math:`\alpha`. For linear Barrowman aerodynamics it reduces to
+   the :math:`\alpha=0` AC, so the linear margin already captures it; only
+   nonlinear tabulated coefficients make it move. Large-incidence stability is
+   usually read more meaningfully from the dynamic-stability coefficients
+   (Layer 4).
 
 Layer 4 — Dynamic stability
 ===========================
@@ -292,31 +307,23 @@ Quick reference
    * - ``Rocket.aerodynamic_center`` (``_yaw``)
      - :math:`M`
      - Linear (small-incidence) center of pressure; static-margin reference.
-       ``cp_position`` is a deprecated alias.
-   * - ``Rocket.center_of_pressure(α, β, M, Re)``
-     - :math:`\alpha,\beta,M,Re`
-     - Nonlinear CP at finite incidence; combines both planes.
-   * - ``Rocket.center_of_pressure_over_{alpha,beta}``
-     - :math:`\alpha` / :math:`\beta`
-     - CP travel sweep (design time).
+       ``cp_position`` is an alias.
    * - ``Rocket.aerodynamic_coefficients(α, β, M, Re)``
      - :math:`\alpha,\beta,M,Re`
      - Total :math:`C_N`, :math:`C_m` about the center of dry mass.
+   * - ``Rocket.aerodynamic_coefficients_full(α, β, M, Re)``
+     - :math:`\alpha,\beta,M,Re`
+     - Six signed coefficients; reconstruct the nonlinear CP as
+       :math:`x_\text{cdm} + c\,L_\text{ref}\,C_m/C_L`.
    * - ``Rocket.static_margin`` (``_yaw``)
      - :math:`t`
      - Linear margin at :math:`M=0` (calibers).
    * - ``Rocket.stability_margin`` (``_yaw``)
      - :math:`M, t`
      - Linear margin vs Mach and time (calibers).
-   * - ``Rocket.stability_margin_over_{alpha,beta}``
-     - :math:`\alpha` / :math:`\beta`
-     - Nonlinear margin travel sweep (design time).
-   * - ``Flight.stability_margin``
+   * - ``Flight.stability_margin`` (``_yaw``)
      - :math:`t`
      - Linear margin along the realized Mach(t) — smooth.
-   * - ``Flight.realized_stability_margin``
-     - :math:`t`
-     - Nonlinear margin at the realized incidence.
    * - ``Flight.{pitch,yaw}_natural_frequency``
      - :math:`t`
      - Attitude oscillation natural frequency :math:`\omega_n`.
@@ -331,11 +338,9 @@ Visualizing stability
 =====================
 
 - ``Rocket.plots.stability_margin`` — linear margin vs Mach and time (surface).
-- ``Rocket.plots.stability_margin_over_alpha`` / ``_over_beta`` — nonlinear
-  margin travel with incidence (yaw sweep shown when non-axisymmetric).
 - ``Rocket.plots.aerodynamic_coefficients`` — :math:`C_N`, :math:`C_m` vs
   :math:`\alpha`; ``drag_curves`` for :math:`C_D` vs Mach.
-- ``Flight.plots.stability_and_control_data`` — linear and realized margin vs
+- ``Flight.plots.stability_and_control_data`` — linear margin (pitch and yaw) vs
   time, plus the FFT frequency response.
 - ``Flight.plots.dynamic_stability_data`` — natural frequency and damping ratio
   vs time (pitch and yaw).
@@ -385,8 +390,10 @@ generic coefficient path as every other surface.
    The independent :math:`\alpha,\ \beta` decomposition of the linear model
    coincides with the classical single-plane Barrowman projection to first
    order and diverges only at large combined angle of attack, where the
-   underlying linear coefficients are themselves no longer valid; the nonlinear
-   :meth:`rocketpy.Rocket.center_of_pressure` captures that regime.
+   underlying linear coefficients are themselves no longer valid; that regime is
+   captured by tabulated :class:`rocketpy.GenericSurface` coefficients, from
+   which the local neutral point and the nonlinear CP can be reconstructed via
+   :meth:`rocketpy.Rocket.aerodynamic_coefficients_full`.
 
 References
 ==========

@@ -22,6 +22,35 @@ class ControllableGenericSurface(GenericSurface):
         Current value of each control variable (defaults to 0).
     """
 
+    # TODO: deflection-dependent static-margin diagnostics.
+    #
+    # The in-flight dynamics are correct: the deflection feeds the coefficient
+    # functions live every step (see ``_coefficient_arguments``), and the surface
+    # never physically moves, so its force-application point / ``cp_to_cdm`` cache
+    # cannot go stale (unlike an individual fin's cant angle, which IS a physical
+    # reconfiguration and is refreshed via ``Rocket.refresh_controlled_components``).
+    #
+    # The gap is diagnostic-only. The derived ``center_of_pressure_z`` /
+    # ``aerodynamic_center`` come from ``cm_alpha = d(cm)/d(alpha)`` evaluated ONCE
+    # (in ``_set_derived_cp_accessors``) with the control variables frozen at their
+    # value at construction (0). So if ``cm`` couples alpha and a control axis
+    # (e.g. an ``alpha * deflection`` term), the reported ``static_margin`` is
+    # pinned to the zero-deflection configuration and does not track ``set_control``.
+    # It also is not a single well-defined number: the static margin of a deflected
+    # control surface is inherently a function of the control input.
+    #
+    # To address this properly (not a correctness fix, defer until there is a real
+    # need), likely some combination of:
+    #   - an ``initial_deflection`` (per-control) argument in ``__init__`` so the
+    #     derived cp accessors are built about a chosen reference deflection rather
+    #     than always 0;
+    #   - re-deriving the cp accessors when the deflection changes -- reuse the
+    #     fin mechanism: bump ``_geometry_version`` in ``set_control`` and have
+    #     ``Rocket.refresh_controlled_components`` re-run the derived-cp step;
+    #   - dedicated stability plots/prints that sweep the static margin (and cp)
+    #     OVER the control-deflection range, since a single scalar margin is the
+    #     wrong abstraction for a controllable surface.
+
     def __init__(
         self,
         reference_area,
@@ -126,7 +155,9 @@ class ControllableGenericSurface(GenericSurface):
         """Return the current value of a control variable."""
         return self.control_state[name]
 
-    def to_dict(self, include_outputs=False):  # pylint: disable=unused-argument
+    def to_dict(  # pylint: disable=unused-argument
+        self, include_outputs=False, **kwargs
+    ):
         return {
             "reference_area": self.reference_area,
             "reference_length": self.reference_length,

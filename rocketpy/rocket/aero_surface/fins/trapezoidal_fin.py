@@ -219,8 +219,8 @@ class TrapezoidalFin(Fin):
         self.cpz = cpz
         self.cp = (self.cpx, self.cpy, self.cpz)
 
-    def to_dict(self, include_outputs=False):
-        data = super().to_dict(include_outputs=include_outputs)
+    def to_dict(self, include_outputs=False, **kwargs):
+        data = super().to_dict(include_outputs=include_outputs, **kwargs)
         data.update(self.geometry.get_data(include_outputs=include_outputs))
         return data
 

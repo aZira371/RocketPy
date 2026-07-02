@@ -2312,9 +2312,7 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         (:meth:`Rocket.stability_margin`) at the realized flight Mach and time at
         each instant, capturing the Mach variation of the aerodynamic center
         together with the center-of-mass shift as propellant burns. It is
-        well-conditioned and never spikes. For the nonlinear margin that follows
-        the center of pressure at the actual angle of attack/sideslip, see
-        :meth:`realized_stability_margin`.
+        well-conditioned and never spikes.
 
         Returns
         -------
@@ -2343,89 +2341,6 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         return [
             (t, self.rocket.stability_margin_yaw(m, t)) for t, m in self.mach_number
         ]
-
-    @funcify_method("Time (s)", "Realized Stability Margin (c)", "linear", "zero")
-    def realized_stability_margin(self):
-        """Nonlinear (realized) stability margin along the flight, in calibers.
-
-        Co-equal companion to :meth:`stability_margin`: instead of the
-        aerodynamic center it uses the rocket's *nonlinear* center of pressure
-        (:meth:`Rocket.center_of_pressure`) at the realized flight state -- the
-        actual angle of attack, sideslip, Mach and Reynolds at each time step --
-        so it reveals how the center of pressure travels with incidence (and,
-        for non-axisymmetric rockets, combines the pitch and yaw planes at the
-        actual combined incidence).
-
-        For a non-axisymmetric rocket the margin is **direction-dependent** (the
-        pitch and yaw planes differ), and during most of the flight the rocket
-        flies at near-zero incidence, where the *direction* of the residual
-        incidence vector is numerical noise (slight coning). Reporting the
-        directional center of pressure there would make the margin swing between
-        the pitch- and yaw-plane values. To avoid that, the realized value is
-        blended into the linear margin by how much real incidence there is: at
-        negligible incidence the result is the linear :meth:`stability_margin`,
-        and only a genuine disturbance (a few degrees of incidence) reveals the
-        nonlinear travel. The value also falls back to the linear margin where
-        the dynamic pressure is negligible (rail, rest, apogee).
-
-        Returns
-        -------
-        stability : rocketpy.Function
-            Realized stability margin in calibers as a function of time.
-        """
-        csys = self.rocket._csys
-        diameter = 2 * self.rocket.radius
-        time = self.time
-
-        # These are all tabulated at exactly ``self.time`` (their source is
-        # ``column_stack([self.time, values])`` or same-grid Function
-        # arithmetic), so read the values straight from ``.source`` instead of
-        # re-evaluating per node. ``mach`` is reused by both the realized cp and
-        # the linear margin below. ``center_of_mass`` is a rocket-level Function
-        # on a different grid, so it still needs ``get_value_opt(t)``.
-        alpha = self.partial_angle_of_attack.source[:, 1]
-        beta = self.angle_of_sideslip.source[:, 1]
-        mach = self.mach_number.source[:, 1]
-        reynolds = self.reynolds_number.source[:, 1]
-
-        center_of_pressure = np.array(
-            [
-                self.rocket.center_of_pressure(
-                    np.deg2rad(a),
-                    np.deg2rad(b),
-                    m,
-                    re,
-                )
-                for a, b, m, re in zip(alpha, beta, mach, reynolds)
-            ]
-        )
-        center_of_mass = np.array(
-            [self.rocket.center_of_mass.get_value_opt(t) for t in time]
-        )
-        margin_realized = (center_of_mass - center_of_pressure) / diameter * csys
-
-        margin_model = np.array(
-            [
-                self.rocket.stability_margin.get_value_opt(m, t)
-                for m, t in zip(mach, time)
-            ]
-        )
-
-        # Weight the (direction-dependent) realized value by how much real
-        # incidence there is, with a smoothstep ramp up to ~2 deg, so the
-        # near-zero-incidence direction noise collapses to the linear margin.
-        incidence = np.hypot(alpha, beta)
-        weight = np.clip(incidence / 2.0, 0.0, 1.0)
-        weight = weight**2 * (3.0 - 2.0 * weight)
-        margin_blended = (1.0 - weight) * margin_model + weight * margin_realized
-
-        # Fall back fully to the linear margin where the rocket is barely moving
-        # (dynamic pressure below 1% of its flight-wide peak: rail, rest, apogee).
-        dynamic_pressure = self.dynamic_pressure.source[:, 1]
-        meaningful = dynamic_pressure > 0.01 * dynamic_pressure.max()
-        margin = np.where(meaningful, margin_blended, margin_model)
-
-        return np.column_stack((time, margin))
 
     # Dynamic stability
     def _lateral_inertia(self, dry_lateral_inertia, motor_lateral_inertia):

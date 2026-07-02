@@ -775,25 +775,37 @@ class _RocketPlots:
         ax.scatter(cp, 0, label="Center of Pressure", color="red", s=10, zorder=10)
 
     def _center_of_pressure_range(self, plane, max_angle=np.deg2rad(15), samples=31):
-        """Min and max center-of-pressure position over an incidence sweep.
+        """Min and max nonlinear center-of-pressure position over an incidence
+        sweep.
 
         Sweeps the angle of attack (xz plane) or sideslip (yz plane) from 0 to
-        ``max_angle`` using the nonlinear :meth:`Rocket.center_of_pressure` and
-        returns the extent of the resulting center-of-pressure travel.
+        ``max_angle`` and reconstructs the nonlinear center of pressure --
+        ``x_cdm + csys * d * Cm / CN`` -- from the rocket aerodynamic
+        coefficients (:meth:`Rocket.aerodynamic_coefficients_full`), returning
+        the extent of its travel. The center of pressure is singular at zero
+        incidence (``CN -> 0``); those samples are skipped.
         """
+        rocket = self.rocket
+        csys = rocket._csys
+        diameter = 2 * rocket.radius
+        cdm = rocket.center_of_dry_mass_position
         angles = np.linspace(0, max_angle, samples)
-        if plane == "yz":
-            positions = np.array(
-                [self.rocket.center_of_pressure(0.0, b, 0.0) for b in angles]
-            )
-        else:
-            positions = np.array(
-                [self.rocket.center_of_pressure(a, 0.0, 0.0) for a in angles]
-            )
-        positions = positions[np.isfinite(positions)]
+        positions = []
+        for angle in angles:
+            if plane == "yz":
+                coeffs = rocket.aerodynamic_coefficients_full(0.0, angle, 0.0)
+                force, moment = coeffs["cQ"], coeffs["cn"]
+            else:
+                coeffs = rocket.aerodynamic_coefficients_full(angle, 0.0, 0.0)
+                force, moment = coeffs["cL"], coeffs["cm"]
+            if force == 0:
+                continue
+            position = cdm + csys * diameter * moment / force
+            if np.isfinite(position):
+                positions.append(position)
         if len(positions) == 0:
             return (0.0, 0.0)
-        return (float(positions.min()), float(positions.max()))
+        return (float(min(positions)), float(max(positions)))
 
     def _draw_sensors(self, ax, sensors, plane):
         """Draw the sensor as a small thick line at the position of the sensor,

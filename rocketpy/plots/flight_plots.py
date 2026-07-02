@@ -1277,12 +1277,6 @@ class _FlightPlots:
                 self.flight.stability_margin_yaw[:, 1],
                 label="Linear yaw",
             )
-        ax1.plot(
-            self.flight.realized_stability_margin[:, 0],
-            self.flight.realized_stability_margin[:, 1],
-            label="Realized (nonlinear CP)",
-            linestyle="--",
-        )
         ax1.set_title("Stability Margin")
         ax1.set_xlabel("Time (s)")
         ax1.set_ylabel("Stability Margin (c)")

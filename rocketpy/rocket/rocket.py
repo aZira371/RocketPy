@@ -136,11 +136,9 @@ class Rocket:
     Rocket.aerodynamic_center : Function
         Function of Mach number expressing the rocket's aerodynamic center
         (the linearized, small-incidence center of pressure) position relative
-        to the user defined rocket reference system. The nonlinear center of
-        pressure at a finite angle of attack is :meth:`Rocket.center_of_pressure`.
-        ``Rocket.cp_position`` is a deprecated alias for this attribute.
-        See :doc:`Positions and Coordinate Systems </user/positions>`
-        for more information.
+        to the user defined rocket reference system. ``Rocket.cp_position`` is an
+        alias for this attribute. See :doc:`Positions and Coordinate Systems
+        </user/positions>` for more information.
     Rocket.stability_margin : Function
         Stability margin of the rocket, in calibers, as a function of mach
         number and time. Stability margin is defined as the distance between
@@ -452,6 +450,9 @@ class Rocket:
         # the motor have been added.
         self._cp_outdated = True
         self._margin_outdated = True
+        # One-shot guard for the non-axisymmetric advisory (see
+        # ``evaluate_center_of_pressure``); warned at most once per rocket.
+        self._axisymmetry_warned = False
 
         # Initialize plots and prints object
         self.prints = _RocketPrints(self)
@@ -726,9 +727,10 @@ class Rocket:
         The aerodynamic center is the linearized (small-incidence,
         :math:`\\alpha=\\beta=0`) center of pressure: the normal-force-slope-
         weighted average of every aerodynamic surface's location. It is the
-        well-conditioned reference used by the static and stability margins and
-        is distinct from :meth:`center_of_pressure`, which is the *nonlinear*
-        center of pressure at a finite angle of attack/sideslip.
+        well-conditioned reference used by the static and stability margins. The
+        nonlinear center of pressure at a finite angle of attack/sideslip is a
+        separate, singular quantity (``x_cdm + csys * d * Cm / CN``) that can be
+        reconstructed from :meth:`aerodynamic_coefficients_full` when needed.
 
         It is computed independently for the **pitch** plane
         (``aerodynamic_center``, from the normal-force/pitch-moment slopes) and
@@ -784,6 +786,25 @@ class Rocket:
             if self._total_side_coeff_der.get_value(0) != 0:
                 self._aerodynamic_center_yaw /= self._total_side_coeff_der
 
+        # One-shot non-axisymmetry advisory. Both plane centers are already built
+        # here, so detection costs only a Mach sweep -- no extra evaluation and no
+        # per-surface-add repetition. ``_cp_outdated`` was cleared at the top, so
+        # reading ``is_axisymmetric`` (which reads the centers) does not recurse.
+        # Emitted at most once per rocket, when the scalar pitch-plane margins
+        # first become potentially misleading.
+        if not self._axisymmetry_warned and not self.is_axisymmetric:
+            self._axisymmetry_warned = True
+            max_diff = self._cp_plane_max_difference()
+            warnings.warn(
+                "Pitch- and yaw-plane aerodynamic centers differ "
+                f"(max difference ~{max_diff:.4g} m): the rocket is not "
+                "axisymmetric. 'aerodynamic_center', 'static_margin' and "
+                "'stability_margin' describe the PITCH plane; use "
+                "'aerodynamic_center_yaw', 'static_margin_yaw' and "
+                "'stability_margin_yaw' for the yaw plane.",
+                stacklevel=2,
+            )
+
         return self._aerodynamic_center
 
     def _cp_plane_max_difference(self):
@@ -836,119 +857,20 @@ class Rocket:
         # Tolerance relative to the rocket diameter (caliber-scale).
         return self._cp_plane_max_difference() <= 1e-6 * (2 * self.radius)
 
-    def _warn_if_not_axisymmetric(self):
-        """Warn, at surface-add time, when the rocket is non-axisymmetric so the
-        user knows the scalar ``static_margin``/``stability_margin`` describe the
-        pitch plane only. Short-circuits with no computation for rockets built
-        solely from axisymmetric-by-construction surfaces (the Barrowman set);
-        only a generic surface or individual fin triggers the Mach sweep."""
-        if not self.aerodynamic_surfaces or self.is_axisymmetric:
-            return
-        max_diff = self._cp_plane_max_difference()
-        warnings.warn(
-            "Pitch- and yaw-plane aerodynamic centers differ "
-            f"(max difference ~{max_diff:.4g} m): the rocket is not "
-            "axisymmetric. 'aerodynamic_center', 'static_margin' and "
-            "'stability_margin' describe the PITCH plane; use "
-            "'aerodynamic_center_yaw', 'static_margin_yaw' and "
-            "'stability_margin_yaw' for the yaw plane.",
-            stacklevel=3,
-        )
-
     @property
     def cp_position(self):
-        """Deprecated alias for :attr:`aerodynamic_center` (the linearized,
-        Mach-dependent center of pressure / aerodynamic center)."""
-        warnings.warn(
-            "'cp_position' is deprecated and will be removed in a future "
-            "release; use 'aerodynamic_center' (the linearized center of "
-            "pressure) instead. For the nonlinear center of pressure at a given "
-            "angle of attack use 'center_of_pressure(alpha, beta, mach)'.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        """Alias for :attr:`aerodynamic_center`.
+
+        Historically named "center of pressure", this is the linearized,
+        Mach-dependent aerodynamic center -- the slope-weighted (Barrowman)
+        quantity the rocketry community conventionally calls the CP, and the
+        well-conditioned reference used by the static and stability margins.
+        The genuine, force-application center of pressure at a finite incidence
+        is ``x_cdm + csys * d * Cm / CN`` and can be reconstructed on demand from
+        :meth:`aerodynamic_coefficients_full`; it is intentionally not exposed as
+        a method because it is singular at zero normal force (zero incidence).
+        """
         return self.aerodynamic_center
-
-    def _aerodynamic_center_limit(self, alpha, beta, mach):
-        """Small-incidence limit of :meth:`center_of_pressure`: the linearized
-        aerodynamic center, blended between the pitch and yaw planes by the
-        squared normal-force contribution of each, so the nonlinear center of
-        pressure stays continuous in the ``(alpha, beta)`` direction as the
-        incidence goes to zero (pure pitch -> pitch AC, pure sideslip -> yaw AC).
-        """
-        weight_pitch = (self.total_lift_coeff_der.get_value_opt(mach) * alpha) ** 2
-        weight_yaw = (self.total_side_coeff_der.get_value_opt(mach) * beta) ** 2
-        pitch = self.aerodynamic_center.get_value_opt(mach)
-        if weight_pitch + weight_yaw == 0:
-            return pitch
-        yaw = self.aerodynamic_center_yaw.get_value_opt(mach)
-        return (pitch * weight_pitch + yaw * weight_yaw) / (weight_pitch + weight_yaw)
-
-    def center_of_pressure(self, alpha, beta, mach, reynolds=0.0):
-        """Nonlinear center of pressure axial position, as a function of the
-        aerodynamic state.
-
-        Unlike :attr:`aerodynamic_center` (the linearized center of pressure, a
-        function of Mach alone, valid only near zero incidence), this aggregates
-        the *actual* force and moment of every aerodynamic surface at the
-        requested angle of attack ``alpha``, sideslip ``beta`` and Mach number,
-        then locates the axial point about which the resultant transverse
-        aerodynamic force produces no moment:
-        ``z_cp = (M2*R1 - M1*R2) / (R1**2 + R2**2)`` (about the center of dry
-        mass, from ``M = r x F``).
-
-        Because the resultant force is evaluated at the actual *combined*
-        incidence, a single axial location captures both the pitch and the yaw
-        plane -- the ``aerodynamic_center``/``aerodynamic_center_yaw`` split is
-        only needed for the linearized slopes, which must pick a perturbation
-        axis. As ``alpha, beta -> 0`` the normal force vanishes and the location
-        becomes a ``0/0`` limit; there the linearized aerodynamic center
-        (:attr:`aerodynamic_center`) is returned, which the nonlinear value
-        converges to.
-
-        Parameters
-        ----------
-        alpha : float
-            Angle of attack, in radians (pitch plane, body aerodynamic frame).
-        beta : float
-            Sideslip angle, in radians (yaw plane, body aerodynamic frame).
-        mach : float
-            Free-stream Mach number.
-        reynolds : float, optional
-            Rocket-level Reynolds number (based on the rocket diameter). Each
-            surface's Reynolds number is scaled to its own reference length.
-            Defaults to ``0`` (vanishing-Reynolds limit, matching the linearized
-            ``aerodynamic_center`` convention).
-
-        Returns
-        -------
-        float
-            Center of pressure position along the rocket axis, in the rocket
-            coordinate system (m). See :doc:`Positions and Coordinate Systems
-            </user/positions>`.
-        """
-        # Below ~1 deg total incidence the normal force is too small for the
-        # moment/normal-force ratio to be well conditioned (a 0/0 limit at the
-        # origin, finite-precision noise just above it). Return the linearized
-        # aerodynamic center, which the nonlinear value converges to, so the
-        # result is continuous and never spikes as the rocket oscillates through
-        # zero incidence.
-        if alpha**2 + beta**2 < math.radians(1.0) ** 2 or (
-            len(self.aerodynamic_surfaces) == 0
-        ):
-            return self._aerodynamic_center_limit(alpha, beta, mach)
-
-        total_x, total_y, _, moment_x, moment_y, _, _ = (
-            self._aerodynamic_forces_and_moments(alpha, beta, mach, reynolds)
-        )
-
-        normal_force_sq = total_x**2 + total_y**2
-        if normal_force_sq == 0:
-            return self._aerodynamic_center_limit(alpha, beta, mach)
-        # Axial offset (body frame) from the center of dry mass to the line of
-        # action of the resultant transverse force.
-        cp_offset = (moment_y * total_x - moment_x * total_y) / normal_force_sq
-        return self.center_of_dry_mass_position + self._csys * cp_offset
 
     def _aerodynamic_forces_and_moments(self, alpha, beta, mach, reynolds=0.0):
         """Total body-frame aerodynamic force ``(R1, R2, R3)`` and moment
@@ -1625,14 +1547,12 @@ class Rocket:
             self.__add_single_surface(surfaces, positions)
 
         # Adding a surface changes both the aerodynamic center and the margins;
-        # flag them for lazy rebuild on next access (see the properties).
+        # flag them for lazy rebuild on next access (see the properties). The
+        # non-axisymmetry advisory is emitted (once) from
+        # ``evaluate_center_of_pressure`` on that first rebuild, rather than
+        # eagerly here on every add.
         self._cp_outdated = True
         self._margin_outdated = True
-
-        # The asymmetry warning is the one piece evaluated eagerly: it is a
-        # setup-time hint about which margin attributes to trust, and the check
-        # is free for axisymmetric-by-construction (Barrowman) rockets.
-        self._warn_if_not_axisymmetric()
 
     def add_vehicle_aerodynamic_surface(
         self, coefficients, reference_position=None, name="Vehicle Aerodynamics"
