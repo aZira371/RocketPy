@@ -1028,6 +1028,12 @@ class Rocket:
         """Calculates the relative position of each aerodynamic surface
         center of pressure to the rocket's center of dry mass in Body Axes
         Coordinate System."""
+        # Surfaces pinned to the center of dry mass (air brakes added without
+        # an explicit position) always apply their force with zero moment arm,
+        # even after add_motor moves the center of dry mass.
+        if getattr(surface, "_pin_cp_to_cdm", False):
+            self.surfaces_cp_to_cdm[surface] = Vector([0, 0, 0])
+            return
         # position of the surfaces coordinate system origin in body frame
         pos_origin = Vector(
             [
@@ -2280,6 +2286,7 @@ class Rocket:
         name="AirBrakes",
         controller_name="AirBrakes Controller",
         controller_needs=None,
+        position=None,
     ):
         """Creates a new air brakes system, storing its parameters such as
         drag coefficient curve, controller function, sampling rate, and
@@ -2307,12 +2314,13 @@ class Rocket:
             - If a Function, it must take two parameters: deployment level and
               Mach number, and return the drag coefficient.
 
-            .. note:: For ``override_rocket_drag = False``, at
-                deployment level 0, the drag coefficient is assumed to be 0,
-                independent of the input drag coefficient curve. This means that
-                the simulation always considers that at a deployment level of 0,
-                the air brakes are completely retracted and do not contribute to
-                the drag of the rocket.
+            .. note:: At deployment level 0 the drag coefficient is assumed
+                to be 0, independent of the input drag coefficient curve. This
+                means that the simulation always considers that at a deployment
+                level of 0, the air brakes are completely retracted and do not
+                contribute to the drag of the rocket (and, for
+                ``override_rocket_drag = True``, the rocket body drag applies
+                normally while the brakes are retracted).
 
           controller_function : callable
                 Function that executes the control logic, with signature
@@ -2389,13 +2397,22 @@ class Rocket:
             ``'state_dot'``, ``'pressure'``, ``'state_history'``.
             ``None`` (default) assumes no needs; pass an explicit list if your
             controller accesses any of the keys above.
+        position : int, float, optional
+            Axial position of the air brakes station in the rocket's user
+            coordinate system (same convention as :meth:`add_surfaces`). When
+            given, the air-brake force is applied at that station, producing
+            the corresponding moments at nonzero angle of attack. If ``None``
+            (default), the force application point is pinned to the center of
+            dry mass, giving zero moment arm and matching the historical
+            drag-only behavior.
 
         Returns
         -------
         air_brakes : AirBrakes
             AirBrakes object created.
-        controller : Controller
-            Controller object created.
+        controller : AirBrakesController
+            Controller object created. Only returned if ``return_controller``
+            is ``True``.
         """
         reference_area = reference_area if reference_area is not None else self.area
         air_brakes = AirBrakes(
@@ -2526,12 +2543,26 @@ class Rocket:
             name=controller_name,
             needs=controller_needs,
         )
-        self.air_brakes.append(air_brakes)
-        self._add_controllers(_controller)
+        self._attach_air_brakes(air_brakes, _controller, position=position)
         if return_controller:
             return air_brakes, _controller
         else:
             return air_brakes
+
+    def _attach_air_brakes(self, air_brakes, controller=None, position=None):
+        """Wire an AirBrakes surface (and optionally its controller) into the
+        rocket: the surface joins ``aerodynamic_surfaces`` so its drag is
+        summed in the standard surface loop, and is also appended to the
+        ``air_brakes`` list. Without an explicit ``position``, the force
+        application point is pinned to the center of dry mass (zero moment
+        arm), reproducing the historical drag-only behavior."""
+        if position is None:
+            air_brakes._pin_cp_to_cdm = True
+            position = self.center_of_dry_mass_position
+        self.add_surfaces(air_brakes, position)
+        self.air_brakes.append(air_brakes)
+        if controller is not None:
+            self._add_controllers(controller)
 
     def set_rail_buttons(
         self,

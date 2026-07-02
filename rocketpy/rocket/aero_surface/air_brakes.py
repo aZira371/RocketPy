@@ -9,11 +9,11 @@ from rocketpy.prints.aero_surface_prints import _AirBrakesPrints
 from .controllable_generic_surface import ControllableGenericSurface
 
 
-# TODO: review airbrakes implementation to make it more in line with events
 class AirBrakes(ControllableGenericSurface):
     """AirBrakes class. Inherits from :class:`ControllableGenericSurface`, using
     ``deployment_level`` as its single control variable and a multivariable drag
-    coefficient.
+    coefficient. Air brakes are summed in the equations of motion through the
+    standard aerodynamic-surface loop, like any other generic surface.
 
     Attributes
     ----------
@@ -36,6 +36,10 @@ class AirBrakes(ControllableGenericSurface):
     AirBrakes.name : str
         Name of the air brakes.
     """
+
+    # When True, the rocket applies the air-brake force at the center of dry
+    # mass (zero moment arm). Set by Rocket when no position is given.
+    _pin_cp_to_cdm = False
 
     def __init__(
         self,
@@ -70,12 +74,13 @@ class AirBrakes(ControllableGenericSurface):
             - If a Function, it must take two parameters: deployment level and
               Mach number, and return the drag coefficient.
 
-            .. note:: For ``override_rocket_drag = False``, at
-                deployment level 0, the drag coefficient is assumed to be 0,
-                independent of the input drag coefficient curve. This means that
-                the simulation always considers that at a deployment level of 0,
-                the air brakes are completely retracted and do not contribute to
-                the drag of the rocket.
+            .. note:: At deployment level 0 the drag coefficient is assumed
+                to be 0, independent of the input drag coefficient curve. This
+                means that the simulation always considers that at a deployment
+                level of 0, the air brakes are completely retracted and do not
+                contribute to the drag of the rocket (and, for
+                ``override_rocket_drag = True``, the rocket body drag applies
+                normally while the brakes are retracted).
 
         reference_area : int, float
             Reference area used to calculate the drag force of the air brakes
@@ -116,9 +121,12 @@ class AirBrakes(ControllableGenericSurface):
             interpolation="linear",
         )
 
-        # Multivariable drag coefficient over the generic-surface inputs plus the
-        # ``deployment_level`` control axis. The deployment-0 ⇒ Cd 0 rule applies
-        # only when the air brakes add to (rather than override) the rocket drag.
+        # Multivariable drag coefficient over the generic-surface inputs plus
+        # the ``deployment_level`` control axis. Retracted air brakes always
+        # contribute zero drag; when ``override_rocket_drag`` is set, the
+        # rocket body drag is suppressed while the brakes are deployed (see
+        # the flight derivatives), so this surface then carries the whole
+        # vehicle drag.
         def drag_coefficient_function(
             alpha,
             beta,
@@ -129,7 +137,7 @@ class AirBrakes(ControllableGenericSurface):
             roll_rate,
             deployment_level,
         ):  # pylint: disable=unused-argument
-            if deployment_level == 0 and not self.override_rocket_drag:
+            if deployment_level == 0:
                 return 0.0
             return self.drag_coefficient.get_value_opt(deployment_level, mach)
 

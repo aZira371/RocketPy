@@ -50,12 +50,13 @@ def _compute_drag_7d_inputs(
 def _aerodynamic_drag_force(
     flight, time, rho, stream_speed, alpha, beta, mach, reynolds, omega
 ):
-    """Total rocket axial aerodynamic (drag) force, including air brakes.
+    """Rocket body axial aerodynamic (drag) force.
 
-    Selects the power-on/power-off drag curve based on the motor burn state, and
-    then adds (or, when ``override_rocket_drag`` is set, substitutes) the drag of
-    any deployed air brakes, evaluated through the generic-surface coefficient
-    machinery.
+    Selects the power-on/power-off drag curve based on the motor burn state.
+    Air brakes are aerodynamic surfaces summed in the standard surface loop;
+    here they only matter through ``override_rocket_drag``: while such air
+    brakes are deployed, the body drag is suppressed entirely and the
+    air-brake surface carries the whole vehicle drag instead.
 
     Parameters
     ----------
@@ -78,6 +79,10 @@ def _aerodynamic_drag_force(
         The axial (body z) aerodynamic drag force.
     """
     rocket = flight.rocket
+    for air_brakes in rocket.air_brakes:
+        if air_brakes.override_rocket_drag and air_brakes.deployment_level > 0:
+            return 0.0
+
     if time < rocket.motor.burn_out_time:
         drag_coefficient = rocket.power_on_drag_7d(
             alpha, beta, mach, reynolds, omega[0], omega[1], omega[2]
@@ -86,38 +91,7 @@ def _aerodynamic_drag_force(
         drag_coefficient = rocket.power_off_drag_7d(
             alpha, beta, mach, reynolds, omega[0], omega[1], omega[2]
         )
-    drag_force = -0.5 * rho * stream_speed**2 * rocket.area * drag_coefficient
-
-    # Air brakes are drag-only and may override the rocket drag.
-    for air_brakes in rocket.air_brakes:
-        if air_brakes.deployment_level > 0:
-            # Air brakes are a (controllable) generic surface, so feed the
-            # coefficient the non-dimensional reduced rates, like every other
-            # generic surface (see GenericSurface.compute_forces_and_moments).
-            reduced = (
-                air_brakes.reference_length / (2 * stream_speed)
-                if stream_speed > 0
-                else 0.0
-            )
-            air_brakes_cd = air_brakes.cD.get_value_opt(
-                *air_brakes._coefficient_arguments(
-                    alpha,
-                    beta,
-                    mach,
-                    reynolds,
-                    omega[0] * reduced,
-                    omega[1] * reduced,
-                    omega[2] * reduced,
-                )
-            )
-            air_brakes_force = (
-                -0.5 * rho * stream_speed**2 * air_brakes.reference_area * air_brakes_cd
-            )
-            if air_brakes.override_rocket_drag:
-                drag_force = air_brakes_force  # Substitutes rocket drag
-            else:
-                drag_force += air_brakes_force
-    return drag_force
+    return -0.5 * rho * stream_speed**2 * rocket.area * drag_coefficient
 
 
 def udot_rail1(flight, t, u, post_processing=False):
