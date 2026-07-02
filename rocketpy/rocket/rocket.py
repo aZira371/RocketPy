@@ -1677,6 +1677,7 @@ class Rocket:
         SurfaceController
             The controller created and registered on the rocket.
         """
+        SurfaceController._validate_surfaces(surface)
         self.add_surfaces(surface, position)
         if controller_name is None:
             first = surface[0] if isinstance(surface, (list, tuple)) else surface
