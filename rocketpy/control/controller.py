@@ -1,4 +1,5 @@
 import warnings
+from importlib import import_module
 from inspect import signature
 
 import numpy as np
@@ -603,10 +604,11 @@ class Controller(Event):
     def _scheduled_from_history(cls, data, controlled_objects):
         """Build a ScheduledController replaying the recorded control history
         of a serialized controller whose function could not be restored."""
-        # Imported here to avoid a circular import.
-        from .scheduled_controller import (  # pylint: disable=import-outside-toplevel
-            ScheduledController,
-        )
+        # Resolved dynamically to avoid a circular import between this module
+        # and scheduled_controller (which subclasses Controller).
+        scheduled_controller_class = import_module(
+            "rocketpy.control.scheduled_controller"
+        ).ScheduledController
 
         schedule = {
             object_name: {
@@ -621,7 +623,7 @@ class Controller(Event):
             for object_name, variables in schedule.items()
             if variables
         }
-        controller = ScheduledController(
+        controller = scheduled_controller_class(
             schedule=schedule,
             controlled_objects=(
                 controlled_objects if controlled_objects is not None else []
