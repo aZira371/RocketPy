@@ -1,3 +1,4 @@
+import warnings
 from inspect import signature
 
 import numpy as np
@@ -429,6 +430,10 @@ class Controller(Event):
                 If True, serialize controller_function, disable_on, and
                 enable_on callables using hex encoding. If False, use function
                 name. Default is True.
+            include_outputs : bool, optional
+                If True, include the recorded ``control_history`` so a loaded
+                controller can expose its schedule (and be replayed) without
+                re-simulating. Default is False.
 
         Returns
         -------
@@ -451,7 +456,7 @@ class Controller(Event):
         if allow_pickle and callable(enable_on):
             enable_on = to_hex_encode(enable_on)
 
-        return {
+        data = {
             "controller_function": controller_function,
             "sampling_rate": self.sampling_rate,
             "name": self.name,
@@ -460,9 +465,25 @@ class Controller(Event):
             "enabled": self.enabled,
             "disable_on": disable_on,
             "enable_on": enable_on,
-            # Note: controlled_objects are recovered in from_dict via
-            # name matching in Rocket deserialization
+            "needs": sorted(self.needs),
+            # Controlled objects are not serialized here; their object names
+            # are recorded so Rocket deserialization can rewire them to the
+            # freshly decoded surfaces by name.
+            "controlled_objects_ref": [
+                getattr(obj, "name", tracked_name)
+                for tracked_name, obj in self._tracked
+            ]
+            or getattr(self, "_controlled_objects_ref", []),
         }
+        if kwargs.get("include_outputs", False):
+            data["control_history"] = {
+                object_name: {
+                    variable: [list(sample) for sample in samples]
+                    for variable, samples in variables.items()
+                }
+                for object_name, variables in self.control_history.items()
+            }
+        return data
 
     @classmethod
     def from_dict(cls, data, controlled_objects=None):
@@ -489,11 +510,32 @@ class Controller(Event):
         enabled = data.get("enabled", True)
         disable_on = data.get("disable_on")
         enable_on = data.get("enable_on")
+        needs = data.get("needs") or None
+        control_history = data.get("control_history")
 
         try:
             controller_function = from_hex_decode(controller_function)
         except (TypeError, ValueError):
             pass
+        if not callable(controller_function):
+            # The controller function could not be restored (e.g. it was
+            # serialized by name only, or unpickling failed across
+            # environments). If a recorded control history is available, fall
+            # back to replaying it open-loop.
+            if control_history:
+                warnings.warn(
+                    f"The controller function of '{name}' could not be "
+                    "restored; building a ScheduledController that replays "
+                    "the recorded control schedule open-loop instead.",
+                    UserWarning,
+                )
+                return cls._scheduled_from_history(data, controlled_objects)
+            raise ValueError(
+                f"Could not restore the controller function of '{name}', and "
+                "no recorded control history is available to replay. "
+                "Re-create the controller manually from its original "
+                "function."
+            )
 
         # Deserialize disable_on: try hex decoding for callables, keep strings and None
         try:
@@ -516,17 +558,77 @@ class Controller(Event):
             pending_name = controlled_objects_name
             controlled_objects_name = None
 
-        controller = cls(
-            controller_function=controller_function,
-            controlled_objects=controlled_objects,
-            sampling_rate=sampling_rate,
+        controller = cls._construct(
+            controller_function,
+            controlled_objects,
+            sampling_rate,
             name=name,
             context=context,
             controlled_objects_name=controlled_objects_name,
             enabled=enabled,
             disable_on=disable_on,
             enable_on=enable_on,
+            needs=needs,
         )
         if pending_name is not None:
             controller.controlled_objects_name = pending_name
+        cls._restore_serialized_state(controller, data)
+        return controller
+
+    @classmethod
+    def _construct(cls, controller_function, controlled_objects, sampling_rate, **kwargs):
+        """Constructor hook for ``from_dict``; subclasses whose ``__init__``
+        renames or drops parameters override this."""
+        return cls(controller_function, controlled_objects, sampling_rate, **kwargs)
+
+    @staticmethod
+    def _restore_serialized_state(controller, data):
+        """Restore serialization-only attributes: the controlled-object name
+        references used for rewiring, and any recorded control history (so
+        ``recorded_schedule`` works on a loaded controller)."""
+        controller._controlled_objects_ref = data.get("controlled_objects_ref", [])
+        control_history = data.get("control_history")
+        if control_history:
+            controller.control_history = {
+                object_name: {
+                    variable: [tuple(sample) for sample in samples]
+                    for variable, samples in variables.items()
+                }
+                for object_name, variables in control_history.items()
+            }
+
+    @classmethod
+    def _scheduled_from_history(cls, data, controlled_objects):
+        """Build a ScheduledController replaying the recorded control history
+        of a serialized controller whose function could not be restored."""
+        # Imported here to avoid a circular import.
+        from .scheduled_controller import (  # pylint: disable=import-outside-toplevel
+            ScheduledController,
+        )
+
+        schedule = {
+            object_name: {
+                variable: np.array(samples)
+                for variable, samples in variables.items()
+                if samples
+            }
+            for object_name, variables in data["control_history"].items()
+        }
+        schedule = {
+            object_name: variables
+            for object_name, variables in schedule.items()
+            if variables
+        }
+        controller = ScheduledController(
+            schedule=schedule,
+            controlled_objects=(
+                controlled_objects if controlled_objects is not None else []
+            ),
+            sampling_rate=data.get("sampling_rate"),
+            context=data.get("context", {}),
+            name=data.get("name", "Controller"),
+            enabled=data.get("enabled", True),
+        )
+        controller.controlled_objects_name = data.get("controlled_objects_name")
+        Controller._restore_serialized_state(controller, data)
         return controller

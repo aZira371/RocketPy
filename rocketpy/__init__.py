@@ -3,6 +3,7 @@ from .control import (
     AirBrakesController,
     ControlledObject,
     Controller,
+    ScheduledController,
     SurfaceController,
 )
 from .environment import Environment, EnvironmentAnalysis

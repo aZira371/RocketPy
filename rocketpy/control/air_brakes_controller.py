@@ -70,6 +70,12 @@ class AirBrakesController(SurfaceController):
         self.prints = _AirBrakesControllerPrints(self)
         self.plots = _AirBrakesControllerPlots(self)
 
+    @classmethod
+    def _construct(cls, controller_function, controlled_objects, sampling_rate, **kwargs):
+        # __init__ pins controlled_objects_name to "air_brakes" itself.
+        kwargs.pop("controlled_objects_name", None)
+        return cls(controller_function, controlled_objects, sampling_rate, **kwargs)
+
     @property
     def air_brakes(self):
         """The controlled AirBrakes surface."""

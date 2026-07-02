@@ -1,6 +1,8 @@
 """Unit tests for wiring air brakes (and controllable surfaces) into the
-Rocket: surface-loop membership, cp pinning, stability invariance, and the
-add_air_brakes compatibility surface."""
+Rocket: surface-loop membership, cp pinning, stability invariance, the
+add_air_brakes compatibility surface, and save/load round trips."""
+
+import json
 
 import pytest
 
@@ -9,6 +11,7 @@ from rocketpy import (
     ControllableGenericSurface,
     SurfaceController,
 )
+from rocketpy._encoders import RocketPyDecoder, RocketPyEncoder
 
 DRAG_CURVE = "data/rockets/calisto/air_brakes_cd.csv"
 
@@ -122,3 +125,46 @@ class TestAddControllableSurface:
             calisto_motorless.add_controllable_surface(
                 object(), -0.5, lambda **kwargs: None, sampling_rate=20
             )
+
+
+class TestRocketRoundTrip:
+    def test_rocket_with_air_brakes_round_trips(self, calisto_motorless):
+        add_air_brakes(calisto_motorless)
+
+        encoded = json.dumps(calisto_motorless, cls=RocketPyEncoder)
+        loaded = json.loads(encoded, cls=RocketPyDecoder)
+
+        # single air-brake instance, in both the surface loop and the list
+        assert len(loaded.air_brakes) == 1
+        air_brakes = loaded.air_brakes[0]
+        assert air_brakes in [s for s, _ in loaded.aerodynamic_surfaces]
+        assert tuple(loaded.surfaces_cp_to_cdm[air_brakes]) == (0, 0, 0)
+
+        # controller rewired to the decoded instance by name
+        assert len(loaded._controllers) == 1
+        controller = loaded._controllers[0]
+        assert isinstance(controller, AirBrakesController)
+        assert controller.air_brakes is air_brakes
+
+        controller(time=1.0, state=[0.0] * 13)
+        assert air_brakes.deployment_level == 0.5
+        assert controller.control_history["air_brakes"]["deployment_level"] == [
+            (1.0, 0.5)
+        ]
+
+    def test_legacy_air_brakes_key_still_loads(self, calisto_motorless):
+        air_brakes, _ = add_air_brakes(calisto_motorless)
+        data = calisto_motorless.to_dict()
+        # simulate a legacy file: air brakes only under the "air_brakes" key
+        data["aerodynamic_surfaces"] = [
+            (surface, position)
+            for surface, position in calisto_motorless.aerodynamic_surfaces
+            if surface is not air_brakes
+        ]
+        data["air_brakes"] = [air_brakes]
+        data["_controllers"] = []
+
+        loaded = type(calisto_motorless).from_dict(data)
+        assert loaded.air_brakes == [air_brakes]
+        assert air_brakes in [s for s, _ in loaded.aerodynamic_surfaces]
+        assert tuple(loaded.surfaces_cp_to_cdm[air_brakes]) == (0, 0, 0)

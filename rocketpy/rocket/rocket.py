@@ -29,11 +29,7 @@ from rocketpy.rocket.aero_surface.fins.trapezoidal_fin import TrapezoidalFin
 from rocketpy.rocket.aero_surface.generic_surface import GenericSurface
 from rocketpy.rocket.components import Components
 from rocketpy.rocket.parachute import Parachute
-from rocketpy.tools import (
-    deprecated,
-    find_obj_from_hash,
-    parallel_axis_theorem_from_com,
-)
+from rocketpy.tools import deprecated, parallel_axis_theorem_from_com
 
 
 # pylint: disable=too-many-instance-attributes, too-many-public-methods, too-many-instance-attributes
@@ -2798,10 +2794,11 @@ class Rocket:
             "coordinate_system_orientation": self.coordinate_system_orientation,
             "motor": self.motor,
             "motor_position": self.motor_position,
+            # Air brakes are serialized once, inside aerodynamic_surfaces
+            # (with their position); the air_brakes list is rebuilt on load.
             "aerodynamic_surfaces": self.aerodynamic_surfaces,
             "rail_buttons": self.rail_buttons,
             "parachutes": self.parachutes,
-            "air_brakes": self.air_brakes,
             "_controllers": self._controllers,
             "sensors": self.sensors,
         }
@@ -2925,26 +2922,45 @@ class Rocket:
         for sensor, position in data["sensors"]:
             rocket.add_sensor(sensor, position)
 
-        for air_brake in data["air_brakes"]:
-            rocket.air_brakes.append(air_brake)
+        # Air brakes serialized inside aerodynamic_surfaces (new format) were
+        # re-added by add_surfaces above; rebuild the air_brakes list from
+        # them. Legacy files carry air brakes only under the "air_brakes" key
+        # and must still be wired into the surface loop (pinned to the CDM,
+        # which is how they historically behaved).
+        rocket.air_brakes = [
+            surface
+            for surface, _ in rocket.aerodynamic_surfaces
+            if isinstance(surface, AirBrakes)
+        ]
+        for air_brake in data.get("air_brakes", []):
+            if air_brake not in rocket.air_brakes:
+                rocket._attach_air_brakes(air_brake)
+
+        # Controllers reference their controlled objects by name; match them
+        # against the freshly decoded surfaces and air brakes.
+        candidates = {}
+        for surface, _ in rocket.aerodynamic_surfaces:
+            candidates.setdefault(getattr(surface, "name", None), surface)
+        for air_brake in rocket.air_brakes:
+            candidates.setdefault(air_brake.name, air_brake)
 
         for controller in data["_controllers"]:
-            interactive_objects_hash = getattr(controller, "_interactive_objects_hash")
-            if interactive_objects_hash is not None:
-                is_iterable = isinstance(interactive_objects_hash, Iterable)
-                if not is_iterable:
-                    interactive_objects_hash = [interactive_objects_hash]
-                for hash_ in interactive_objects_hash:
-                    if (hashed_obj := find_obj_from_hash(data, hash_)) is not None:
-                        if not is_iterable:
-                            controller.interactive_objects = hashed_obj
-                        else:
-                            controller.interactive_objects.append(hashed_obj)
-                    else:
-                        warnings.warn(
-                            "Could not find controller interactive objects."
-                            "Deserialization will proceed, results may not be accurate."
-                        )
+            references = getattr(controller, "_controlled_objects_ref", None) or []
+            objects = []
+            for reference in references:
+                if reference in candidates:
+                    objects.append(candidates[reference])
+                else:
+                    warnings.warn(
+                        f"Could not find controlled object '{reference}' while "
+                        f"loading rocket; controller '{controller.name}' will "
+                        "be attached without it."
+                    )
+            if objects:
+                controller.bind_controlled_objects(
+                    objects[0] if len(objects) == 1 else objects,
+                    controller.controlled_objects_name,
+                )
             rocket._add_controllers(controller)
 
         return rocket

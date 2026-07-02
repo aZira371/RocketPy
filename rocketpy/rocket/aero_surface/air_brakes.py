@@ -208,7 +208,9 @@ class AirBrakes(ControllableGenericSurface):
         self.info()
         self.plots.drag_coefficient_curve()
 
-    def to_dict(self, **kwargs):  # pylint: disable=unused-argument
+    def to_dict(  # pylint: disable=unused-argument
+        self, include_outputs=False, **kwargs
+    ):
         return {
             "drag_coefficient_curve": self.drag_coefficient,
             "reference_area": self.reference_area,
@@ -216,11 +218,12 @@ class AirBrakes(ControllableGenericSurface):
             "override_rocket_drag": self.override_rocket_drag,
             "deployment_level": self.initial_deployment_level,
             "name": self.name,
+            "position_pinned_to_cdm": self._pin_cp_to_cdm,
         }
 
     @classmethod
     def from_dict(cls, data):
-        return cls(
+        air_brakes = cls(
             drag_coefficient_curve=data.get("drag_coefficient_curve"),
             reference_area=data.get("reference_area"),
             clamp=data.get("clamp"),
@@ -228,3 +231,6 @@ class AirBrakes(ControllableGenericSurface):
             deployment_level=data.get("deployment_level"),
             name=data.get("name"),
         )
+        # Legacy files (no key) were always applied with zero moment arm.
+        air_brakes._pin_cp_to_cdm = data.get("position_pinned_to_cdm", True)
+        return air_brakes
