@@ -46,19 +46,17 @@ class _ControllerPrints:
         else:
             print(f"Controller refresh rate: {self.controller.sampling_rate:.3f} Hz")
 
-    def interactive_objects(self):
-        """Prints interactive objects."""
-        print("interactive Objects")
-        # check if is list
-        if isinstance(self.controller.interactive_objects, list):
-            for obj in self.controller.interactive_objects:
-                print(getattr(obj, "name", str(obj)))
-        else:
-            obj = self.controller.interactive_objects
+    def controlled_objects(self):
+        """Prints the objects controlled by the controller."""
+        print("Controlled Objects")
+        controlled_objects = self.controller.controlled_objects
+        if not isinstance(controlled_objects, (list, tuple)):
+            controlled_objects = [controlled_objects]
+        for obj in controlled_objects:
             print(getattr(obj, "name", str(obj)))
 
     def all(self):
-        """Prints all information about the parachute.
+        """Prints all information about the controller.
 
         Returns
         -------
@@ -68,4 +66,4 @@ class _ControllerPrints:
         print("\nController Details\n")
         print(self.controller)
         self.controller_function()
-        self.interactive_objects()
+        self.controlled_objects()

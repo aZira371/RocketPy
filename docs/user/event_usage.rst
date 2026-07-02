@@ -147,8 +147,9 @@ The following parameters are always or conditionally available:
 
 **Custom parameters:**
 
-- Any additional key-value pairs defined in the event's ``context`` dictionary 
-  are unpacked and passed as separate ``kwargs``.
+- Values stored in the event's ``context`` dictionary are accessed through
+  ``kwargs["event"].context`` inside the trigger and callback; they are not
+  unpacked into separate ``kwargs``.
 
 Understanding Event Parameters
 ------------------------------
