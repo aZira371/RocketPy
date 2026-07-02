@@ -5,7 +5,7 @@ from typing import Iterable
 
 import numpy as np
 
-from rocketpy.control.controller import _Controller
+from rocketpy.control.controller import Controller
 from rocketpy.mathutils.function import Function
 from rocketpy.mathutils.vector_matrix import Matrix, Vector
 from rocketpy.motors.empty_motor import EmptyMotor
@@ -2256,7 +2256,7 @@ class Rocket:
                 ``height_agl`` (float, m),
                 ``event`` (:class:`Event` wrapping this controller),
                 ``sampling_rate`` (float, Hz),
-                ``controller`` (this :class:`_Controller` instance),
+                ``controller`` (this :class:`Controller` instance),
                 ``controlled_objects`` (same as ``air_brakes``),
                 ``air_brakes`` (:class:`AirBrakes`).
                 The following keys are only injected when declared via
@@ -2409,7 +2409,7 @@ class Rocket:
             state = kwargs.get("state")
             state_history = kwargs.get("state_history")
             observed_variables = controller_context.get("observed_variables", [])
-            interactive_objects = kwargs.get("interactive_objects", air_brakes)
+            interactive_objects = air_brakes
             sensors = kwargs.get("sensors")
             environment = kwargs.get("environment")
 
@@ -2431,15 +2431,14 @@ class Rocket:
 
             return orig_controller(*legacy_args)
 
-        # TODO: should this be in the airbrakes object instead?
-        _controller = _Controller(
+        _controller = Controller(
             controller_function=controller_wrapper,
             controlled_objects=air_brakes,
             controlled_objects_name="air_brakes",
             sampling_rate=sampling_rate,
             context=controller_context,
             name=controller_name,
-            controller_needs=controller_needs,
+            needs=controller_needs,
         )
         self.air_brakes.append(air_brakes)
         self._add_controllers(_controller)

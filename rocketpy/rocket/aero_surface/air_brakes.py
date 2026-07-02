@@ -143,6 +143,9 @@ class AirBrakes(ControllableGenericSurface):
         )
 
         self.deployment_level = deployment_level
+        # Re-capture so ``_reset`` restores the (possibly clamped) initial
+        # deployment level rather than the base class default of 0.
+        self.initial_control_state = dict(self.control_state)
         self.prints = _AirBrakesPrints(self)
         self.plots = _AirBrakesPlots(self)
 
@@ -169,12 +172,6 @@ class AirBrakes(ControllableGenericSurface):
     @deployment_level.setter
     def deployment_level(self, value):
         self.set_control("deployment_level", value)
-
-    def _reset(self):
-        """Resets the air brakes to their initial state. This is ran at the
-        beginning of each simulation to ensure the air brakes are in the correct
-        state."""
-        self.deployment_level = self.initial_deployment_level
 
     def evaluate_geometrical_parameters(self):
         """Evaluates the geometrical parameters of the aerodynamic surface.

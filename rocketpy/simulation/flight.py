@@ -700,9 +700,8 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
             parachute._reset_signals()  # reset parachute pressure signals
             self.events.append(parachute.event)
 
-        # Controller events
-        for controller in self._controllers:
-            self.events.append(controller.event)
+        # Controller events (a Controller is an Event)
+        self.events.extend(self._controllers)
 
         # User-defined events are appended last
         self.events.extend(user_events)
@@ -735,9 +734,9 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         self.sensors = self.rocket.sensors.get_components()
         self.sensors_by_name = self.rocket.sensors_by_name
 
-        # reset controllable object to initial state (only airbrakes for now)
-        for air_brakes in self.rocket.air_brakes:
-            air_brakes._reset()
+        # Controlled objects (air brakes, controllable surfaces, ...) are
+        # restored to their initial control state by ``Controller.reset()``,
+        # invoked for every event in ``__init_events``.
 
         self.sensor_data = {}
         for sensor in self.sensors:
@@ -2930,6 +2929,14 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
             ode_solver=data.get("ode_solver", "LSODA"),
             simulation_mode=data.get("simulation_mode", "6DOF"),
         )
+
+    @property
+    def controllers(self):
+        """List of controllers active in this flight. Each controller exposes
+        its execution returns via ``log`` and the recorded control state of
+        its controlled objects via ``control_history`` /
+        ``recorded_schedule``."""
+        return self._controllers
 
     # These should be deprecated on v1.13
     @deprecated(

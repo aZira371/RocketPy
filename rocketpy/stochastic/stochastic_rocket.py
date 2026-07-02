@@ -3,7 +3,7 @@
 import warnings
 from random import choice
 
-from rocketpy.control import _Controller
+from rocketpy.control import Controller
 from rocketpy.mathutils.vector_matrix import Vector
 from rocketpy.motors.empty_motor import EmptyMotor
 from rocketpy.motors.motor import GenericMotor, Motor
@@ -400,7 +400,7 @@ class StochasticRocket(StochasticModel):
         ----------
         air_brakes : StochasticAirBrakes or Airbrakes
             The air brake to be added to the stochastic rocket.
-        controller : _Controller
+        controller : Controller
             Deterministic air brake controller.
         """
         if not isinstance(air_brakes, (AirBrakes, StochasticAirBrakes)):
@@ -773,14 +773,14 @@ class StochasticRocket(StochasticModel):
         for air_brake in self.air_brakes:
             air_brake = self._create_air_brake(air_brake)
             base_controller = self.air_brake_controller
-            _controller = _Controller(
+            _controller = Controller(
                 controller_function=base_controller.controller_function,
                 controlled_objects=air_brake,
                 controlled_objects_name=base_controller.controlled_objects_name,
                 sampling_rate=base_controller.sampling_rate,
                 context=base_controller.context.copy(),
                 name=base_controller.name,
-                controller_needs=base_controller.controller_needs,
+                needs=base_controller.needs,
             )
             rocket.air_brakes.append(air_brake)
             rocket._add_controllers(_controller)

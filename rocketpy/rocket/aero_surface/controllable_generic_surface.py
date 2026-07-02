@@ -98,6 +98,7 @@ class ControllableGenericSurface(GenericSurface):
             name=name,
         )
         # ``self.prints``/``self.plots`` are the generic ones wired by the base.
+        self.initial_control_state = dict(self.control_state)
 
     def _coefficient_arguments(
         self,
@@ -154,6 +155,13 @@ class ControllableGenericSurface(GenericSurface):
     def get_control(self, name):
         """Return the current value of a control variable."""
         return self.control_state[name]
+
+    def _reset(self):
+        """Restore all control variables to their initial values. Ran by the
+        controller at the beginning of each simulation so control state does
+        not leak across flights."""
+        for name, value in self.initial_control_state.items():
+            self.set_control(name, value)
 
     def to_dict(  # pylint: disable=unused-argument
         self, include_outputs=False, **kwargs
