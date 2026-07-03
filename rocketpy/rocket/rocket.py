@@ -6,6 +6,7 @@ from typing import Iterable
 import numpy as np
 
 from rocketpy.control.air_brakes_controller import AirBrakesController
+from rocketpy.control.controller import Controller
 from rocketpy.control.surface_controller import SurfaceController
 from rocketpy.mathutils.function import Function
 from rocketpy.mathutils.vector_matrix import Matrix, Vector
@@ -343,6 +344,8 @@ class Rocket:
         self.sensors_by_name = {}
         self.aerodynamic_surfaces = Components()
         self.surfaces_cp_to_cdm = {}
+        self.effectors = []
+        self.effectors_cp_to_cdm = {}
         self.rail_buttons = Components()
 
         self._aerodynamic_center = Function(
@@ -1018,6 +1021,8 @@ class Rocket:
         """
         for surface, position in self.aerodynamic_surfaces:
             self.__evaluate_single_surface_cp_to_cdm(surface, position)
+        for effector in self.effectors:
+            self.__evaluate_single_effector_cp_to_cdm(effector)
         return self.surfaces_cp_to_cdm
 
     def __evaluate_single_surface_cp_to_cdm(self, surface, position):
@@ -1051,6 +1056,24 @@ class Rocket:
             surface._rotation_surface_to_body @ application_point + pos_origin
         )  # TODO: this should be recomputed whenever cant angle changes for fin
         self.surfaces_cp_to_cdm[surface] = pos
+
+    def __evaluate_single_effector_cp_to_cdm(self, effector):
+        """Body-frame position of an effector's application point relative to the
+        center of dry mass (its moment arm). ``effector.position`` is either an
+        axial station (float) or a full ``(x, y, z)`` point in the user
+        coordinate system."""
+        position = effector.position
+        if isinstance(position, (int, float)):
+            px, py, pz = 0.0, 0.0, float(position)
+        else:
+            px, py, pz = position[0], position[1], position[2]
+        self.effectors_cp_to_cdm[effector] = Vector(
+            [
+                (px - self.cm_eccentricity_x) * self._csys,
+                (py - self.cm_eccentricity_y),
+                (pz - self.center_of_dry_mass_position) * self._csys,
+            ]
+        )
 
     def evaluate_stability_margin(self):
         """Calculates the stability margin of the rocket as a function of mach
@@ -1689,6 +1712,83 @@ class Rocket:
             enabled=enabled,
             disable_on=disable_on,
             enable_on=enable_on,
+        )
+        self._add_controllers(controller)
+        return controller
+
+    def add_effector(
+        self,
+        effector,
+        position=None,
+        controller_function=None,
+        sampling_rate=None,
+        controlled_objects_name=None,
+        needs=None,
+        enabled=True,
+        disable_on=None,
+        enable_on=None,
+        context=None,
+        controller_name=None,
+    ):
+        """Register a control :class:`rocketpy.Effector` on the rocket.
+
+        The effector injects a body-frame force and/or moment **directly** into
+        the equations of motion (summed alongside the aerodynamic surfaces),
+        rather than producing force through the aerodynamic model. Use it for
+        non-aerodynamic control such as reaction-control thrusters or reaction
+        wheels. Unlike aerodynamic surfaces, effectors are **not** added to
+        ``aerodynamic_surfaces`` and therefore do not affect the center of
+        pressure or the stability margins.
+
+        If ``controller_function`` is given, a :class:`rocketpy.Controller`
+        driving the effector is created and registered (closed-loop control); the
+        controller sets the effector's control state each step. Otherwise the
+        effector runs open-loop at its (fixed) control state.
+
+        Parameters
+        ----------
+        effector : Effector
+            The effector to add (e.g. a :class:`rocketpy.GenericEffector`).
+        position : float, tuple or None, optional
+            Application station (axial float) or ``(x, y, z)`` point in the user
+            coordinate system, setting the effector's moment arm. If ``None``
+            (default), the effector's existing ``position`` is used.
+        controller_function : callable, optional
+            ``controller_function(**kwargs)`` control law driving the effector
+            (see :class:`Controller`). If ``None`` (default), no controller is
+            created and the effector is open-loop.
+        sampling_rate : float, optional
+            Controller execution rate in hertz (required when
+            ``controller_function`` is given).
+        controlled_objects_name, needs, enabled, disable_on, enable_on, context,
+        controller_name :
+            Forwarded to the created :class:`Controller`; see its documentation.
+
+        Returns
+        -------
+        Controller or Effector
+            The created controller when ``controller_function`` is given,
+            otherwise the effector itself.
+        """
+        if position is not None:
+            effector.position = position
+        self.effectors.append(effector)
+        self.__evaluate_single_effector_cp_to_cdm(effector)
+
+        if controller_function is None:
+            return effector
+
+        controller = Controller(
+            controller_function,
+            effector,
+            sampling_rate,
+            context=context,
+            name=controller_name or f"{effector.name} Controller",
+            controlled_objects_name=controlled_objects_name,
+            enabled=enabled,
+            disable_on=disable_on,
+            enable_on=enable_on,
+            needs=needs,
         )
         self._add_controllers(controller)
         return controller
@@ -2801,6 +2901,7 @@ class Rocket:
             "parachutes": self.parachutes,
             "_controllers": self._controllers,
             "sensors": self.sensors,
+            "effectors": self.effectors,
         }
 
         if kwargs.get("include_outputs", False):
@@ -2936,13 +3037,20 @@ class Rocket:
             if air_brake not in rocket.air_brakes:
                 rocket._attach_air_brakes(air_brake)
 
+        # Effectors are re-registered open-loop; their driving controller (if
+        # any) is restored from "_controllers" below and rewired by name.
+        for effector in data.get("effectors", []):
+            rocket.add_effector(effector)
+
         # Controllers reference their controlled objects by name; match them
-        # against the freshly decoded surfaces and air brakes.
+        # against the freshly decoded surfaces, air brakes and effectors.
         candidates = {}
         for surface, _ in rocket.aerodynamic_surfaces:
             candidates.setdefault(getattr(surface, "name", None), surface)
         for air_brake in rocket.air_brakes:
             candidates.setdefault(air_brake.name, air_brake)
+        for effector in rocket.effectors:
+            candidates.setdefault(effector.name, effector)
 
         for controller in data["_controllers"]:
             references = getattr(controller, "_controlled_objects_ref", None) or []

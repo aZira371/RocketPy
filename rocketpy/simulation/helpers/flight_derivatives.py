@@ -94,6 +94,33 @@ def _aerodynamic_drag_force(
     return -0.5 * rho * stream_speed**2 * rocket.area * drag_coefficient
 
 
+def _apply_effectors(flight, t, velocity_body, omega, mach, R1, R2, R3, M1, M2, M3):
+    """Sum every control effector's body-frame force and moment (about the center
+    of dry mass) into the running force/moment totals.
+
+    Effectors inject force/moment directly (non-aerodynamically); see
+    :class:`rocketpy.Effector`. Returns the updated
+    ``(R1, R2, R3, M1, M2, M3)``. Callers should guard with
+    ``if flight.rocket.effectors:`` to skip the overhead when none are present.
+    """
+    for effector in flight.rocket.effectors:
+        force, moment = effector.evaluate(
+            flight.rocket.effectors_cp_to_cdm[effector],
+            t,
+            velocity_body,
+            omega,
+            mach,
+            flight.env,
+        )
+        R1 += force.x
+        R2 += force.y
+        R3 += force.z
+        M1 += moment.x
+        M2 += moment.y
+        M3 += moment.z
+    return R1, R2, R3, M1, M2, M3
+
+
 def udot_rail1(flight, t, u, post_processing=False):
     """Compute the 1-DOF rail-flight state derivative.
 
@@ -382,6 +409,21 @@ def u_dot(flight, t, u, post_processing=False):
         M1 += M
         M2 += N
         M3 += L
+    # Control effectors: direct body-frame force/moment (non-aerodynamic)
+    if flight.rocket.effectors:
+        R1, R2, R3, M1, M2, M3 = _apply_effectors(
+            flight,
+            t,
+            velocity_in_body_frame,
+            w,
+            free_stream_mach,
+            R1,
+            R2,
+            R3,
+            M1,
+            M2,
+            M3,
+        )
     # Off center moment
     M3 += flight.rocket.cp_eccentricity_x * R2 - flight.rocket.cp_eccentricity_y * R1
 
@@ -614,6 +656,13 @@ def u_dot_generalized_3dof(flight, t, u, post_processing=False):
         R1 += fx
         R2 += fy
         R3 += fz
+
+    # Control effectors contribute their body-frame FORCE only in 3-DOF (there is
+    # no rotational state, so moment-only effectors are inert here).
+    if flight.rocket.effectors:
+        R1, R2, R3, _, _, _ = _apply_effectors(
+            flight, t, vb_body, w, mach, R1, R2, R3, 0, 0, 0
+        )
 
     # Thrust and weight
     # Calculate net thrust including pressure thrust correction if motor is burning
@@ -863,6 +912,22 @@ def u_dot_generalized(flight, t, u, post_processing=False):
         M1 += M
         M2 += N
         M3 += L
+
+    # Control effectors: direct body-frame force/moment (non-aerodynamic)
+    if flight.rocket.effectors:
+        R1, R2, R3, M1, M2, M3 = _apply_effectors(
+            flight,
+            t,
+            velocity_in_body_frame,
+            w,
+            free_stream_mach,
+            R1,
+            R2,
+            R3,
+            M1,
+            M2,
+            M3,
+        )
 
     # Off center moment
     M1 += (
