@@ -60,6 +60,7 @@ Attention: The newest changes should be on top -->
 
 ### Changed
 
+- ENH: Resolve pressure_ISA discretization bounds TODO [#1056](https://github.com/RocketPy-Team/RocketPy/pull/1056)
 - ENH: Refactor flight.py latitude/longitude to use inverted_haversine [#1055](https://github.com/RocketPy-Team/RocketPy/pull/1055)
 
 ### Deprecated

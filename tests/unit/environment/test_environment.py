@@ -707,3 +707,27 @@ def test_pressure_conversion_factor_autodetect_by_model(
         None, None, model
     )
     assert factor == expected_factor
+
+
+def test_pressure_isa_discretization_bounds(example_plain_env):
+    """Test that pressure_ISA contains the expected range of altitudes
+    starting from the minimum geopotential height (-2000m) converted to
+    geometric height, up to the maximum (80000m) geopotential height converted to
+    geometric height.
+    """
+    from rocketpy.tools import geopotential_height_to_geometric_height
+
+    # Act
+    pressure_isa_function = example_plain_env.pressure_ISA
+    source_array = pressure_isa_function.source
+    altitudes = source_array[:, 0]
+
+    # Expected min/max geometric heights
+    earth_radius = example_plain_env.earth_radius
+    expected_min_height = geopotential_height_to_geometric_height(-2000, earth_radius)
+    expected_max_height = geopotential_height_to_geometric_height(80000, earth_radius)
+
+    # Assert
+    assert np.isclose(altitudes[0], expected_min_height)
+    assert np.isclose(altitudes[-1], expected_max_height)
+    assert len(altitudes) == 100
