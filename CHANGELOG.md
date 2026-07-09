@@ -72,6 +72,7 @@ Attention: The newest changes should be on top -->
 
 ### Fixed
 
+- BUG: Environment not Encoding Necessary Parameters for Decode [#1058](https://github.com/RocketPy-Team/RocketPy/pull/1058)
 - FIX: pre-release hardening — bug fixes across the unreleased features [#1047](https://github.com/RocketPy-Team/RocketPy/pull/1047)
 - BUG: Remove duplicate controller process; controllers were being invoked twice per time node [#949](https://github.com/RocketPy-Team/RocketPy/pull/949)
 - BUG: fix wind heading and direction wraparound interpolation [#974](https://github.com/RocketPy-Team/RocketPy/pull/974)

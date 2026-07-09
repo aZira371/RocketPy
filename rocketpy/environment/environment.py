@@ -2917,6 +2917,13 @@ class Environment:
             "timezone": self.timezone,
             "max_expected_height": self.max_expected_height,
             "atmospheric_model_type": self.atmospheric_model_type,
+            "atmospheric_model_init_date": getattr(self, "atmospheric_model_init_date"),
+            "atmospheric_model_end_date": getattr(self, "atmospheric_model_end_date"),
+            "atmospheric_model_interval": getattr(self, "atmospheric_model_interval"),
+            "atmospheric_model_init_lat": getattr(self, "atmospheric_model_init_lat"),
+            "atmospheric_model_end_lat": getattr(self, "atmospheric_model_end_lat"),
+            "atmospheric_model_init_lon": getattr(self, "atmospheric_model_init_lon"),
+            "atmospheric_model_end_lon": getattr(self, "atmospheric_model_end_lon"),
             "pressure": self.pressure,
             "temperature": self.temperature,
             "wind_velocity_x": wind_velocity_x,
@@ -2924,6 +2931,15 @@ class Environment:
             "wind_heading": wind_heading,
             "wind_direction": wind_direction,
             "wind_speed": wind_speed,
+            "level_ensemble": getattr(self, "level_ensemble"),
+            "height_ensemble": getattr(self, "height_ensemble"),
+            "temperature_ensemble": getattr(self, "temperature_ensemble"),
+            "wind_u_ensemble": getattr(self, "wind_u_ensemble"),
+            "wind_v_ensemble": getattr(self, "wind_v_ensemble"),
+            "wind_heading_ensemble": getattr(self, "wind_heading_ensemble"),
+            "wind_direction_ensemble": getattr(self, "wind_direction_ensemble"),
+            "wind_speed_ensemble": getattr(self, "wind_speed_ensemble"),
+            "num_ensemble_members": getattr(self, "num_ensemble_members"),
         }
 
         if kwargs.get("include_outputs", False):
@@ -2947,6 +2963,7 @@ class Environment:
             max_expected_height=data["max_expected_height"],
         )
         atmospheric_model = data["atmospheric_model_type"]
+        env.atmospheric_model_type = atmospheric_model
 
         match atmospheric_model:
             case "standard_atmosphere":
