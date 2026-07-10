@@ -10,12 +10,12 @@ REFERENCE_LENGTH = 1
 @pytest.mark.parametrize(
     "coefficients",
     [
-        "cL_0",
+        "cN_0",
         {"invalid_name": 0},
-        {"cL_0": "inexistent_file.csv"},
-        {"cL_0": Function(lambda x1, x2, x3, x4, x5, x6: 0)},
-        {"cL_0": lambda x1: 0},
-        {"cL_0": {}},
+        {"cN_0": "inexistent_file.csv"},
+        {"cN_0": Function(lambda x1, x2, x3, x4, x5, x6: 0)},
+        {"cN_0": lambda x1: 0},
+        {"cN_0": {}},
     ],
 )
 def test_invalid_initialization(coefficients):
@@ -37,7 +37,7 @@ def test_invalid_initialization_from_csv(filename_invalid_coeff_linear_generic_s
         LinearGenericSurface(
             reference_area=REFERENCE_AREA,
             reference_length=REFERENCE_LENGTH,
-            coefficients={"cL_0": str(filename_invalid_coeff_linear_generic_surface)},
+            coefficients={"cN_0": str(filename_invalid_coeff_linear_generic_surface)},
         )
 
 
@@ -45,11 +45,11 @@ def test_invalid_initialization_from_csv(filename_invalid_coeff_linear_generic_s
     "coefficients",
     [
         {},
-        {"cL_0": 0},
+        {"cN_0": 0},
         {
-            "cL_0": 0,
-            "cQ_0": Function(lambda x1, x2, x3, x4, x5, x6, x7: 0),
-            "cD_0": lambda x1, x2, x3, x4, x5, x6, x7: 0,
+            "cN_0": 0,
+            "cY_0": Function(lambda x1, x2, x3, x4, x5, x6, x7: 0),
+            "cA_0": lambda x1, x2, x3, x4, x5, x6, x7: 0,
         },
     ],
 )
@@ -70,7 +70,7 @@ def test_valid_initialization_from_csv(filename_valid_coeff_linear_generic_surfa
     LinearGenericSurface(
         reference_area=REFERENCE_AREA,
         reference_length=REFERENCE_LENGTH,
-        coefficients={"cL_0": str(filename_valid_coeff_linear_generic_surface)},
+        coefficients={"cN_0": str(filename_valid_coeff_linear_generic_surface)},
     )
 
 

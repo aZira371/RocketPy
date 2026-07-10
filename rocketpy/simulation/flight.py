@@ -609,6 +609,10 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
             A custom ``scipy.integrate.OdeSolver`` can be passed as well.
             For more information on the integration methods, see the scipy
             documentation [1]_.
+        simulation_mode : str, optional
+            Degrees of freedom used to integrate the trajectory. Either "6DOF"
+            (full translational and rotational dynamics) or "3DOF" (point-mass
+            translation only). Default is "6DOF".
         custom_events : Event or list[Event], optional
             Event or list of Events to be monitored during flight. See Event
             class for more details. Default is None.
@@ -2307,19 +2311,16 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
     def stability_margin(self):
         """Linear stability margin along the flight, in calibers.
 
-        This is the classical (aerodynamic-center) margin: it evaluates the
-        rocket's linearized stability margin
-        (:meth:`Rocket.stability_margin`) at the realized flight Mach and time at
-        each instant, capturing the Mach variation of the aerodynamic center
-        together with the center-of-mass shift as propellant burns. It is
-        well-conditioned and never spikes.
+        This is the classical margin: it evaluates the rocket's linearized
+        stability margin (:meth:`Rocket.stability_margin`) at the realized
+        flight Mach and time at each instant, capturing the Mach variation of
+        the aerodynamic center together with the center-of-mass shift as
+        propellant burns.
 
         Returns
         -------
         stability : rocketpy.Function
-            Stability margin in calibers as a function of time. A positive
-            margin (aerodynamic center behind the center of mass) is the classic
-            passive-stability condition.
+            Stability margin in calibers as a function of time.
         """
         return [(t, self.rocket.stability_margin(m, t)) for t, m in self.mach_number]
 
@@ -2330,8 +2331,8 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         Yaw-plane counterpart of :meth:`stability_margin`, using the rocket's
         yaw-plane aerodynamic center (:meth:`Rocket.stability_margin_yaw`).
         Equals :meth:`stability_margin` for an axisymmetric rocket; for a
-        non-axisymmetric rocket (e.g. single-plane canards) it differs, since the
-        pitch and yaw aerodynamic centers no longer coincide.
+        non-axisymmetric rocket (e.g. single-plane canards) it differs, since
+        the pitch and yaw aerodynamic centers no longer coincide.
 
         Returns
         -------
@@ -2343,6 +2344,8 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         ]
 
     # Dynamic stability
+    # TODO: review note: the two methods below this comment needs to have its
+    # equations documented in a .rst file
     def _lateral_inertia(self, dry_lateral_inertia, motor_lateral_inertia):
         """Lateral moment of inertia about the instantaneous center of mass, as
         an array over ``self.time``. Uses the reduced-mass formulation of the
@@ -2369,9 +2372,9 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
 
     def _dynamic_stability(self, lift_slope, stability_margin, lateral_inertia):
         """Linearized oscillator coefficients for one plane, as arrays over
-        ``self.time``: corrective moment coefficient ``C1`` (restoring moment per
-        radian), damping moment coefficient ``C2`` (aerodynamic + jet), undamped
-        natural frequency ``omega_n`` and damping ratio ``zeta``.
+        ``self.time``: corrective moment coefficient ``C1`` (restoring moment
+        per radian), damping moment coefficient ``C2`` (aerodynamic + jet),
+        undamped natural frequency ``omega_n`` and damping ratio ``zeta``.
 
         ``lift_slope`` is the rocket's total normal-force-curve slope for the
         plane (``total_lift_coeff_der`` for pitch, ``total_side_coeff_der`` for
@@ -2407,7 +2410,9 @@ class Flight:  # pylint: disable=too-many-instance-attributes, too-many-public-m
             # Aerodynamic damping: 0.5 rho V A sum_i (A_i/A) C_Nalpha_i arm_i^2.
             damping_aero = 0.0
             for surface, position in self.rocket.aerodynamic_surfaces:
-                slope = surface.lift_coefficient_derivative.get_value_opt(mach)
+                slope = surface.cN_alpha.get_value_opt(
+                    0.0, 0.0, mach, 0.0, 0.0, 0.0, 0.0
+                )
                 cp_position = (
                     position.z - csys * surface.center_of_pressure_z.get_value_opt(mach)
                 )

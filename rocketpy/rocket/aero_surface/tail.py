@@ -41,10 +41,12 @@ class Tail(_BarrowmanSurface):
     Tail.cp : tuple
         Tuple containing the coordinates of the center of pressure of the tail.
     Tail.cl : Function
-        Function that returns the lift coefficient of the tail. The function
-        is defined as a function of the angle of attack and the mach number.
+        Roll-moment coefficient, inherited from the generic-surface model
+        (a function of the flow variables). Zero for a nose cone or tail; for a
+        fin set it carries the cant forcing and roll damping. The lift-curve
+        slope is ``clalpha``.
     Tail.clalpha : float
-        Lift coefficient slope. Has the unit of 1/rad.
+        Normal-force coefficient slope. Has the unit of 1/rad.
     Tail.slant_length : float
         Slant length of the tail. The slant length is defined as the distance
         between the top and bottom of the tail. The slant length is measured
@@ -184,12 +186,7 @@ class Tail(_BarrowmanSurface):
                 )
             ),
             "Mach",
-            f"Lift coefficient derivative for {self.name}",
-        )
-        self.cl = Function(
-            lambda alpha, mach: self.clalpha(mach) * alpha,
-            ["Alpha (rad)", "Mach"],
-            "Cl",
+            f"Normal-force coefficient derivative for {self.name}",
         )
 
     def evaluate_center_of_pressure(self):
@@ -230,18 +227,13 @@ class Tail(_BarrowmanSurface):
 
         if kwargs.get("include_outputs", False):
             clalpha = self.clalpha
-            cl = self.cl
             if kwargs.get("discretize", False):
                 clalpha = clalpha.set_discrete(0, 4, 50)
-                cl = cl.set_discrete(
-                    (-np.pi / 6, 0), (np.pi / 6, 2), (10, 10), mutate_self=False
-                )
 
             data.update(
                 {
                     "cp": self.cp,
                     "clalpha": clalpha,
-                    "cl": cl,
                     "slant_length": self.slant_length,
                     "surface_area": self.surface_area,
                 }

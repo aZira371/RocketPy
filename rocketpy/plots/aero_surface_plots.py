@@ -114,15 +114,14 @@ class _BarrowmanSurfacePlots(_LinearGenericSurfacePlots):
     geometry drawing and the lift-coefficient surface plot."""
 
     def lift(self):
-        """Plots the lift coefficient of the aero surface as a function of Mach
-        and the angle of attack. A 3D plot is expected. See the rocketpy.Function
-        class for more information on how this plot is made.
+        """Plots the lift-curve slope (``clalpha``) of the aero surface as a
+        function of Mach number.
 
         Returns
         -------
         None
         """
-        self.aero_surface.cl()
+        self.aero_surface.clalpha()
 
     def all(self):
         """Plots the surface geometry, the lift coefficient and the
@@ -274,8 +273,7 @@ class _FinsPlots(_BarrowmanSurfacePlots):
         -------
         None
         """
-        print("Lift coefficient:")
-        self.aero_surface.cl(filename=filename)
+        print("Lift coefficient derivative:")
         self.aero_surface.clalpha_single_fin(filename=filename)
         self.aero_surface.clalpha_multiple_fins(filename=filename)
 
@@ -356,8 +354,7 @@ class _FinPlots(_BarrowmanSurfacePlots):
         -------
         None
         """
-        print("Lift coefficient:")
-        self.aero_surface.cl(filename=filename)
+        print("Lift coefficient derivative:")
         self.aero_surface.clalpha_single_fin(filename=filename)
 
     def all(self, *, filename=None):

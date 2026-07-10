@@ -4,10 +4,14 @@ from rocketpy.prints.aero_surface_prints import _LinearGenericSurfacePrints
 from rocketpy.rocket.aero_surface.generic_surface import GenericSurface
 
 
+# TODO: review note: ControllableGenericSurface should also be able to be modelled
+# based on LinearGenericSurface....
 class LinearGenericSurface(GenericSurface):
-    """Class that defines a generic linear aerodynamic surface. This class is
-    used to define aerodynamic surfaces that have aerodynamic coefficients
-    defined as linear functions of the coefficients derivatives."""
+    """An aerodynamic surface whose forces and moments vary linearly with the
+    flow angles and the rotation rates. Instead of full coefficient tables, you
+    give the coefficient *derivatives* (slopes) -- for example how much the normal
+    force changes per radian of angle of attack -- and the surface adds them up
+    linearly."""
 
     def __init__(
         self,
@@ -16,6 +20,8 @@ class LinearGenericSurface(GenericSurface):
         coefficients,
         center_of_pressure=(0, 0, 0),
         name="Generic Linear Surface",
+        interpolation=None,
+        extrapolation=None,
     ):
         """Create a generic linear aerodynamic surface, defined by its
         aerodynamic coefficients derivatives. This surface is used to model any
@@ -42,59 +48,67 @@ class LinearGenericSurface(GenericSurface):
             Reference length of the aerodynamic surface. Has the unit of meters.
             Commonly defined as the rocket's diameter.
         coefficients: dict, optional
-            List of coefficients. If a coefficient is omitted, it is set to 0.
-            The valid coefficients are:\n
-            cL_0: callable, str, optional
-                Coefficient of lift at zero angle of attack. Default is 0.\n
-            cL_alpha: callable, str, optional
-                Coefficient of lift derivative with respect to angle of attack.
+            The coefficient derivatives (slopes), by name. Any you leave out are
+            set to 0. Each one can be a constant, a function, or a path to a data
+            file, and says how one force or moment coefficient changes with one
+            variable (angle in radians, or a non-dimensional rotation rate). The
+            names follow the pattern ``<coefficient>_<variable>``: the coefficient
+            is normal force ``cN``, side force ``cY``, axial force ``cA``, pitch moment ``cm``,
+            yaw moment ``cn`` or roll moment ``cl``; the variable is ``0`` (the
+            value at zero angle of attack, zero sideslip and zero rates),
+            ``alpha``, ``beta``, ``p`` (roll rate), ``q`` (pitch rate) or ``r``
+            (yaw rate). The full list is:\n
+            cN_0: callable, str, optional
+                Coefficient of normal force at zero angle of attack. Default is 0.\n
+            cN_alpha: callable, str, optional
+                Coefficient of normal force derivative with respect to angle of attack.
                 Default is 0.\n
-            cL_beta: callable, str, optional
-                Coefficient of lift derivative with respect to sideslip angle.
+            cN_beta: callable, str, optional
+                Coefficient of normal force derivative with respect to sideslip angle.
                 Default is 0.\n
-            cL_p: callable, str, optional
-                Coefficient of lift derivative with respect to roll rate.
+            cN_p: callable, str, optional
+                Coefficient of normal force derivative with respect to roll rate.
                 Default is 0.\n
-            cL_q: callable, str, optional
-                Coefficient of lift derivative with respect to pitch rate.
+            cN_q: callable, str, optional
+                Coefficient of normal force derivative with respect to pitch rate.
                 Default is 0.\n
-            cL_r: callable, str, optional
-                Coefficient of lift derivative with respect to yaw rate.
+            cN_r: callable, str, optional
+                Coefficient of normal force derivative with respect to yaw rate.
                 Default is 0.\n
-            cQ_0: callable, str, optional
+            cY_0: callable, str, optional
                 Coefficient of side force at zero angle of attack.
                 Default is 0.\n
-            cQ_alpha: callable, str, optional
+            cY_alpha: callable, str, optional
                 Coefficient of side force derivative with respect to angle of
                 attack. Default is 0.\n
-            cQ_beta: callable, str, optional
+            cY_beta: callable, str, optional
                 Coefficient of side force derivative with respect to sideslip
                 angle. Default is 0.\n
-            cQ_p: callable, str, optional
+            cY_p: callable, str, optional
                 Coefficient of side force derivative with respect to roll rate.
                 Default is 0.\n
-            cQ_q: callable, str, optional
+            cY_q: callable, str, optional
                 Coefficient of side force derivative with respect to pitch rate.
                 Default is 0.\n
-            cQ_r: callable, str, optional
+            cY_r: callable, str, optional
                 Coefficient of side force derivative with respect to yaw rate.
                 Default is 0.\n
-            cD_0: callable, str, optional
-                Coefficient of drag at zero angle of attack. Default is 0.\n
-            cD_alpha: callable, str, optional
-                Coefficient of drag derivative with respect to angle of attack.
+            cA_0: callable, str, optional
+                Coefficient of axial force at zero angle of attack. Default is 0.\n
+            cA_alpha: callable, str, optional
+                Coefficient of axial force derivative with respect to angle of attack.
                 Default is 0.\n
-            cD_beta: callable, str, optional
-                Coefficient of drag derivative with respect to sideslip angle.
+            cA_beta: callable, str, optional
+                Coefficient of axial force derivative with respect to sideslip angle.
                 Default is 0.\n
-            cD_p: callable, str, optional
-                Coefficient of drag derivative with respect to roll rate.
+            cA_p: callable, str, optional
+                Coefficient of axial force derivative with respect to roll rate.
                 Default is 0.\n
-            cD_q: callable, str, optional
-                Coefficient of drag derivative with respect to pitch rate.
+            cA_q: callable, str, optional
+                Coefficient of axial force derivative with respect to pitch rate.
                 Default is 0.\n
-            cD_r: callable, str, optional
-                Coefficient of drag derivative with respect to yaw rate.
+            cA_r: callable, str, optional
+                Coefficient of axial force derivative with respect to yaw rate.
                 Default is 0.\n
             cm_0: callable, str, optional
                 Coefficient of pitch moment at zero angle of attack.
@@ -154,8 +168,31 @@ class LinearGenericSurface(GenericSurface):
             Application point of the aerodynamic forces and moments. The
             center of pressure is defined in the local coordinate system of the
             aerodynamic surface. The default value is (0, 0, 0).
-        name : str
-            Name of the aerodynamic surface. Default is 'GenericSurface'.
+        name : str, optional
+            Name of the aerodynamic surface. Default is 'Generic Linear
+            Surface'.
+        interpolation : str or dict, optional
+            How tabulated coefficient derivatives interpolate between points.
+            The accepted methods depend on the coefficient's dimensionality: a
+            1-D table (e.g. a Mach-only curve) accepts ``"linear"``, ``"akima"``,
+            ``"spline"`` and ``"polynomial"``; a multi-dimensional scattered
+            table accepts ``"linear"``, ``"shepard"`` and ``"rbf"``; and a
+            multi-dimensional table on a regular Cartesian grid accepts
+            ``"linear"``, ``"nearest"``, ``"slinear"``, ``"cubic"``,
+            ``"quintic"`` and ``"pchip"`` (with ``"spline"`` mapped to
+            ``"cubic"`` and ``"akima"`` to ``"pchip"``). Accepts either a simple
+            string or a dict keyed by coefficient name (names left out fall back
+            to the default). ``None`` (the default) uses ``"linear"`` for tables
+            built here and keeps a pre-built ``Function``'s own setting.
+        extrapolation : str or dict, optional
+            How tabulated coefficient derivatives behave outside their data
+            range: ``"constant"`` holds the value at the nearest data edge,
+            ``"natural"`` keeps following the curve, and ``"zero"`` returns 0.
+            Accepts either a simple string or a dict keyed by coefficient name
+            (names left out fall back to the default). ``None`` (the default)
+            uses ``"constant"`` for tables built here and keeps whatever a
+            pre-built ``Function`` already carries. Only affects tabulated
+            sources (constants and callables are evaluated directly).
         """
 
         super().__init__(
@@ -164,6 +201,8 @@ class LinearGenericSurface(GenericSurface):
             coefficients=coefficients,
             center_of_pressure=center_of_pressure,
             name=name,
+            extrapolation=extrapolation,
+            interpolation=interpolation,
         )
 
         self.compute_all_coefficients()
@@ -171,28 +210,17 @@ class LinearGenericSurface(GenericSurface):
         self.prints = _LinearGenericSurfacePrints(self)
         self.plots = _LinearGenericSurfacePlots(self)
 
-    def _evaluate_derived_coefficients(self):
-        """Exact override of the diagnostic cp accessors. The linear model
-        already exposes the forcing derivatives ``cL_alpha``/``cm_alpha`` (pitch)
-        and ``cQ_beta``/``cn_beta`` (yaw), so the slopes are read directly
-        (frozen at zero alpha/beta/rates) instead of being recovered by
-        numerical differentiation. Damping derivatives (``_p/_q/_r``) are
-        intentionally excluded from the stability cp.
+    def _evaluate_stability_derivatives(self):
+        """Build the center-of-pressure accessors for the linear model.
+
+        The linear model already stores the coefficient derivatives
+        ``cN_alpha``/``cm_alpha`` (pitch) and ``cY_beta``/``cn_beta`` (yaw) as
+        the surface's own coefficients, so there is nothing to differentiate:
+        :meth:`_set_stability_accessors` reads them directly (evaluated at zero
+        alpha/beta and zero rates). Damping derivatives (``_p/_q/_r``) are
+        intentionally excluded from the stability center of pressure.
         """
-
-        def _at_zero(coefficient, name):
-            return Function(
-                lambda mach: coefficient(0.0, 0.0, mach, 0.0, 0.0, 0.0, 0.0),
-                "Mach",
-                name,
-            )
-
-        self._set_derived_cp_accessors(
-            _at_zero(self.cL_alpha, "cL_alpha"),
-            _at_zero(self.cm_alpha, "cm_alpha"),
-            _at_zero(self.cQ_beta, "cQ_beta"),
-            _at_zero(self.cn_beta, "cn_beta"),
-        )
+        self._set_stability_accessors()
 
     def _get_default_coefficients(self):
         """Returns default coefficients
@@ -204,24 +232,24 @@ class LinearGenericSurface(GenericSurface):
             are the default values.
         """
         default_coefficients = {
-            "cL_0": 0,
-            "cL_alpha": 0,
-            "cL_beta": 0,
-            "cL_p": 0,
-            "cL_q": 0,
-            "cL_r": 0,
-            "cQ_0": 0,
-            "cQ_alpha": 0,
-            "cQ_beta": 0,
-            "cQ_p": 0,
-            "cQ_q": 0,
-            "cQ_r": 0,
-            "cD_0": 0,
-            "cD_alpha": 0,
-            "cD_beta": 0,
-            "cD_p": 0,
-            "cD_q": 0,
-            "cD_r": 0,
+            "cN_0": 0,
+            "cN_alpha": 0,
+            "cN_beta": 0,
+            "cN_p": 0,
+            "cN_q": 0,
+            "cN_r": 0,
+            "cY_0": 0,
+            "cY_alpha": 0,
+            "cY_beta": 0,
+            "cY_p": 0,
+            "cY_q": 0,
+            "cY_r": 0,
+            "cA_0": 0,
+            "cA_alpha": 0,
+            "cA_beta": 0,
+            "cA_p": 0,
+            "cA_q": 0,
+            "cA_r": 0,
             "cm_0": 0,
             "cm_alpha": 0,
             "cm_beta": 0,
@@ -262,6 +290,21 @@ class LinearGenericSurface(GenericSurface):
         terms that are identically zero are skipped entirely. For a Barrowman
         surface each forcing coefficient has at most one non-zero derivative, so
         this typically collapses to a single source call (or to a constant 0).
+
+        Parameters
+        ----------
+        c_0 : AeroCoefficient
+            Zero-angle derivative (constant term).
+        c_alpha : AeroCoefficient
+            Derivative with respect to the angle of attack ``alpha``.
+        c_beta : AeroCoefficient
+            Derivative with respect to the sideslip angle ``beta``.
+
+        Returns
+        -------
+        Function
+            Coefficient as a function of the independent variables
+            ``(alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)``.
         """
         has_0 = not getattr(c_0, "is_zero_coefficient", False)
         has_alpha = not getattr(c_alpha, "is_zero_coefficient", False)
@@ -311,6 +354,21 @@ class LinearGenericSurface(GenericSurface):
         non-zero terms (see :meth:`compute_forcing_coefficient`). For a Barrowman
         surface only ``cl_p`` (roll damping) is non-zero, so most damping
         coefficients collapse to a constant 0.
+
+        Parameters
+        ----------
+        c_p : AeroCoefficient
+            Derivative with respect to the roll rate ``roll_rate``.
+        c_q : AeroCoefficient
+            Derivative with respect to the pitch rate ``pitch_rate``.
+        c_r : AeroCoefficient
+            Derivative with respect to the yaw rate ``yaw_rate``.
+
+        Returns
+        -------
+        Function
+            Coefficient as a function of the independent variables
+            ``(alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)``.
         """
         has_p = not getattr(c_p, "is_zero_coefficient", False)
         has_q = not getattr(c_q, "is_zero_coefficient", False)
@@ -360,20 +418,20 @@ class LinearGenericSurface(GenericSurface):
     def compute_all_coefficients(self):
         """Compute all the aerodynamic coefficients from the derivatives."""
         # pylint: disable=invalid-name
-        self.cLf = self.compute_forcing_coefficient(
-            self.cL_0, self.cL_alpha, self.cL_beta
+        self.cNf = self.compute_forcing_coefficient(
+            self.cN_0, self.cN_alpha, self.cN_beta
         )
-        self.cLd = self.compute_damping_coefficient(self.cL_p, self.cL_q, self.cL_r)
+        self.cNd = self.compute_damping_coefficient(self.cN_p, self.cN_q, self.cN_r)
 
-        self.cQf = self.compute_forcing_coefficient(
-            self.cQ_0, self.cQ_alpha, self.cQ_beta
+        self.cYf = self.compute_forcing_coefficient(
+            self.cY_0, self.cY_alpha, self.cY_beta
         )
-        self.cQd = self.compute_damping_coefficient(self.cQ_p, self.cQ_q, self.cQ_r)
+        self.cYd = self.compute_damping_coefficient(self.cY_p, self.cY_q, self.cY_r)
 
-        self.cDf = self.compute_forcing_coefficient(
-            self.cD_0, self.cD_alpha, self.cD_beta
+        self.cAf = self.compute_forcing_coefficient(
+            self.cA_0, self.cA_alpha, self.cA_beta
         )
-        self.cDd = self.compute_damping_coefficient(self.cD_p, self.cD_q, self.cD_r)
+        self.cAd = self.compute_damping_coefficient(self.cA_p, self.cA_q, self.cA_r)
 
         self.cmf = self.compute_forcing_coefficient(
             self.cm_0, self.cm_alpha, self.cm_beta
@@ -390,11 +448,12 @@ class LinearGenericSurface(GenericSurface):
         )
         self.cld = self.compute_damping_coefficient(self.cl_p, self.cl_q, self.cl_r)
 
-        self.cL = self.cLf
-        self.cQ = self.cQf
-        self.cD = self.cDf
+        self.cN = self.cNf
+        self.cY = self.cYf
+        self.cA = self.cAf
         self.cm = self.cmf
         self.cn = self.cnf
+        self.cl = self.clf
 
     def _compute_from_coefficients(
         self,
@@ -436,38 +495,38 @@ class LinearGenericSurface(GenericSurface):
             Non-dimensional (reduced) yaw rate, ``r * L_ref / (2 * V)``.
         roll_rate : float
             Non-dimensional (reduced) roll rate, ``p * L_ref / (2 * V)``.
+        alpha_dot : float, optional
+            Non-dimensional angle-of-attack rate. Ignored by the linear model;
+            accepted for signature compatibility. Defaults to 0.
+        beta_dot : float, optional
+            Non-dimensional sideslip-angle rate. Ignored by the linear model;
+            accepted for signature compatibility. Defaults to 0.
 
         Returns
         -------
         tuple of float
-            The aerodynamic forces (lift, side_force, drag) and moments
-            (pitch, yaw, roll) in the body frame.
+            The body-frame force components ``(R1, R2, R3)`` and the moments
+            ``(pitch, yaw, roll)``.
         """
-        # Precompute common values. The angular rates arrive already
-        # non-dimensionalized (reduced rates, e.g. ``q* = q * L_ref / (2 * V)``),
-        # so the rate-damping terms use the same dynamic-pressure scaling as the
-        # forcing terms: the ``L_ref / (2 * V)`` factor now lives in the rate
-        # itself, not in the scaling. (Algebraically identical to the previous
-        # ``0.5 * rho * V * A * L / 2`` damping scaling applied to raw rates.)
+        # Precompute common values
         dyn_pressure_area = 0.5 * rho * stream_speed**2 * self.reference_area
         dyn_pressure_area_length = dyn_pressure_area * self.reference_length
-
-        # Evaluate the composed coefficients through the fast, unvalidated
-        # ``get_value_opt`` path (the composed coefficients are callable-source
-        # Functions, so this calls the closure directly, skipping the per-call
-        # ``__call__``/``get_value`` argument validation in the hot loop).
         args = (alpha, beta, mach, reynolds, pitch_rate, yaw_rate, roll_rate)
 
-        # Compute aerodynamic forces (forcing + reduced-rate damping)
-        lift = dyn_pressure_area * (
-            self.cLf.get_value_opt(*args) + self.cLd.get_value_opt(*args)
+        # Body-frame forces (forcing + reduced-rate damping), straight from the
+        # body-frame coefficients: normal cN, side cY, axial cA.
+        normal = dyn_pressure_area * (
+            self.cNf.get_value_opt(*args) + self.cNd.get_value_opt(*args)
         )
-        side = dyn_pressure_area * (
-            self.cQf.get_value_opt(*args) + self.cQd.get_value_opt(*args)
+        yaw_side = dyn_pressure_area * (
+            self.cYf.get_value_opt(*args) + self.cYd.get_value_opt(*args)
         )
-        drag = dyn_pressure_area * (
-            self.cDf.get_value_opt(*args) + self.cDd.get_value_opt(*args)
+        axial = dyn_pressure_area * (
+            self.cAf.get_value_opt(*args) + self.cAd.get_value_opt(*args)
         )
+        r1 = yaw_side
+        r2 = -normal
+        r3 = -axial
 
         # Compute aerodynamic moments (forcing + reduced-rate damping)
         pitch = dyn_pressure_area_length * (
@@ -480,4 +539,4 @@ class LinearGenericSurface(GenericSurface):
             self.clf.get_value_opt(*args) + self.cld.get_value_opt(*args)
         )
 
-        return lift, side, drag, pitch, yaw, roll
+        return r1, r2, r3, pitch, yaw, roll

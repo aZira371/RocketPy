@@ -9,7 +9,6 @@ from rocketpy.prints.aero_surface_prints import _AirBrakesPrints
 from .controllable_generic_surface import ControllableGenericSurface
 
 
-# TODO: review airbrakes implementation to make it more in line with events
 class AirBrakes(ControllableGenericSurface):
     """AirBrakes class. Inherits from :class:`ControllableGenericSurface`, using
     ``deployment_level`` as its single control variable and a multivariable drag
@@ -93,7 +92,7 @@ class AirBrakes(ControllableGenericSurface):
             Default is False.
         deployment_level : float, optional
             Initial deployment level, ranging from 0 to 1. Deployment level is
-            the fraction of the total airbrake area that is Deployment. Default
+            the fraction of the total airbrake area that is deployed. Default
             is 0.
         name : str, optional
             Name of the air brakes. Default is "AirBrakes".

@@ -80,11 +80,12 @@ class Fins(_BaseFin):
         Fin set local center of pressure z coordinate. Has units of length and
         is given in meters.
     Fins.cl : Function
-        Function which defines the lift coefficient as a function of the angle
-        of attack and the Mach number. Takes as input the angle of attack in
-        radians and the Mach number. Returns the lift coefficient.
+        Roll-moment coefficient, inherited from the generic-surface model
+        (a function of the flow variables). Zero for a nose cone or tail; for a
+        fin set it carries the cant forcing and roll damping. The lift-curve
+        slope is ``clalpha``.
     Fins.clalpha : float
-        Lift coefficient slope. Has units of 1/rad.
+        Normal-force coefficient slope. Has units of 1/rad.
     Fins.roll_parameters : list
         List containing the roll moment lift coefficient, the roll moment
         damping coefficient and the cant angle in radians.
@@ -165,7 +166,7 @@ class Fins(_BaseFin):
         """
         self.evaluate_single_fin_lift_coefficient()
 
-        # Lift coefficient derivative for n fins corrected with Fin-Body interference
+        # Normal-force coefficient derivative for n fins corrected with Fin-Body interference
         self.clalpha_multiple_fins = (
             self.fin_num_correction(self.n)
             * self.lift_interference_factor
@@ -173,19 +174,12 @@ class Fins(_BaseFin):
         )  # Function of mach number
         self.clalpha_multiple_fins.set_inputs("Mach")
         self.clalpha_multiple_fins.set_outputs(
-            f"Lift coefficient derivative for {self.n:.0f} fins"
+            f"Normal-force coefficient derivative for {self.n:.0f} fins"
         )
 
         self.clalpha = self.clalpha_multiple_fins
 
-        # Cl = clalpha * alpha
-        self.cl = Function(
-            lambda alpha, mach: alpha * self.clalpha_multiple_fins(mach),
-            ["Alpha (rad)", "Mach"],
-            "Lift coefficient",
-        )
-
-        return self.cl
+        return self.clalpha
 
     def evaluate_roll_parameters(self):
         """Calculates and returns the fin set's roll coefficients.
@@ -282,16 +276,14 @@ class Fins(_BaseFin):
         }
 
         if kwargs.get("include_outputs", False):
-            cl = self.cl
+            clalpha = self.clalpha
             if kwargs.get("discretize", False):
-                cl = cl.set_discrete(
-                    (-np.pi / 6, 0), (np.pi / 6, 2), (10, 10), mutate_self=False
-                )
+                clalpha = clalpha.set_discrete(0, 4, 50)
 
             data.update(
                 {
                     "cp": self.cp,
-                    "cl": cl,
+                    "clalpha": clalpha,
                     "roll_parameters": self.roll_parameters,
                     "rocket_diameter": self.rocket_diameter,
                     "diameter": self.rocket_diameter,

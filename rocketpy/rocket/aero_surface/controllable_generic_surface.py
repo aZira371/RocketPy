@@ -2,24 +2,23 @@ from rocketpy.rocket.aero_surface.generic_surface import GenericSurface
 
 
 class ControllableGenericSurface(GenericSurface):
-    """A generic aerodynamic surface whose coefficients additionally depend on
-    one or more **control-deflection** variables (canards, grid fins, elevons,
-    air-brake deployment, …) sourced at runtime from a controller.
+    """A generic aerodynamic surface whose coefficients also depend on one or
+    more control inputs (canards, grid fins, elevons, air-brake deployment, and
+    so on) set by a controller while the rocket flies.
 
-    On top of the seven standard independent variables of
-    :class:`GenericSurface` (``alpha``, ``beta``, ``mach``, ``reynolds``,
-    ``pitch_rate``, ``yaw_rate``, ``roll_rate``), the coefficient functions take
-    one extra argument per entry of ``controls`` (appended in order). The
-    current control values are held in :attr:`control_state` and mutated each
-    simulation step by a controller (see ``Rocket.add_controllable_surface``);
-    :meth:`_coefficient_arguments` appends them to every coefficient evaluation.
+    On top of the seven standard variables of :class:`GenericSurface`
+    (``alpha``, ``beta``, ``mach``, ``reynolds``, ``pitch_rate``, ``yaw_rate``,
+    ``roll_rate``), each coefficient takes one extra input per control, in the
+    order listed in ``controls``. A controller updates the current control
+    values every simulation step (see ``Rocket.add_controllable_surface``), and
+    they are passed to the coefficients automatically.
 
     Attributes
     ----------
     ControllableGenericSurface.control_variables : list of str
-        Names of the control-deflection axes, in coefficient-argument order.
+        Names of the controls, in the order the coefficients expect them.
     ControllableGenericSurface.control_state : dict
-        Current value of each control variable (defaults to 0).
+        Current value of each control (starts at 0).
     """
 
     # TODO: deflection-dependent static-margin diagnostics.
@@ -32,7 +31,7 @@ class ControllableGenericSurface(GenericSurface):
     #
     # The gap is diagnostic-only. The derived ``center_of_pressure_z`` /
     # ``aerodynamic_center`` come from ``cm_alpha = d(cm)/d(alpha)`` evaluated ONCE
-    # (in ``_set_derived_cp_accessors``) with the control variables frozen at their
+    # (in ``_set_stability_accessors``) with the control variables frozen at their
     # value at construction (0). So if ``cm`` couples alpha and a control axis
     # (e.g. an ``alpha * deflection`` term), the reported ``static_margin`` is
     # pinned to the zero-deflection configuration and does not track ``set_control``.
@@ -59,6 +58,8 @@ class ControllableGenericSurface(GenericSurface):
         center_of_pressure=(0, 0, 0),
         name="Controllable Generic Surface",
         controls=("deflection",),
+        extrapolation=None,
+        interpolation=None,
     ):
         """Create a controllable generic aerodynamic surface.
 
@@ -69,19 +70,34 @@ class ControllableGenericSurface(GenericSurface):
         reference_length : int, float
             Reference length of the surface, in meters.
         coefficients : dict
-            Aerodynamic coefficients (``cL``, ``cQ``, ``cD``, ``cm``, ``cn``,
-            ``cl``), each a callable/CSV/Function of the seven base variables
-            **plus** the control variables listed in ``controls`` (appended in
-            order). Omitted coefficients default to 0.
+            The six force and moment coefficients (``cL``, ``cQ``, ``cD``,
+            ``cm``, ``cn``, ``cl``), by name. Each one can be a constant, a
+            function, or a path to a data file, and depends on the seven base
+            variables **plus** the controls listed in ``controls`` (in that
+            order). Any you leave out are set to 0.
         center_of_pressure : tuple, list, optional
             Application point of the aerodynamic forces and moments in the local
             surface frame. Default ``(0, 0, 0)``.
         name : str, optional
             Name of the surface. Default ``"Controllable Generic Surface"``.
         controls : iterable of str, optional
-            Names of the control-deflection axes. Default ``("deflection",)``.
-            Each name becomes an extra coefficient argument and a key in
-            :attr:`control_state`.
+            Names of the controls, such as a canard deflection angle. Default
+            ``("deflection",)``. Each name becomes an extra input to every
+            coefficient and a key in :attr:`control_state`.
+        extrapolation : str or dict, optional
+            What tabulated coefficients do outside their data range:
+            ``"constant"`` holds the nearest edge value, ``"natural"`` keeps
+            following the curve, ``"zero"`` returns 0. Give one string for all
+            coefficients or a dict keyed by coefficient name. ``None`` (the
+            default) uses ``"constant"`` for tables built here and leaves a
+            pre-built :class:`Function` unchanged.
+        interpolation : str or dict, optional
+            How tabulated coefficients read values between points (for example
+            ``"linear"``, ``"akima"`` or ``"spline"`` for a 1-D table; see
+            :class:`rocketpy.GenericSurface` for the full list by table type).
+            Give one string for all coefficients or a dict keyed by coefficient
+            name. ``None`` (the default) uses ``"linear"`` for tables built here
+            and leaves a pre-built :class:`Function` unchanged.
         """
         # These must be set before ``super().__init__`` so coefficient
         # processing (arity, CSV validation) and the derived-cp accessors see
@@ -96,6 +112,8 @@ class ControllableGenericSurface(GenericSurface):
             coefficients=coefficients,
             center_of_pressure=center_of_pressure,
             name=name,
+            extrapolation=extrapolation,
+            interpolation=interpolation,
         )
         # ``self.prints``/``self.plots`` are the generic ones wired by the base.
 
@@ -162,9 +180,9 @@ class ControllableGenericSurface(GenericSurface):
             "reference_area": self.reference_area,
             "reference_length": self.reference_length,
             "coefficients": {
-                "cL": self.cL,
-                "cQ": self.cQ,
-                "cD": self.cD,
+                "cN": self.cN,
+                "cY": self.cY,
+                "cA": self.cA,
                 "cm": self.cm,
                 "cn": self.cn,
                 "cl": self.cl,

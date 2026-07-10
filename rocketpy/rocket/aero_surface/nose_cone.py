@@ -65,11 +65,12 @@ class NoseCone(_BarrowmanSurface):
         Nose cone local center of pressure z coordinate. Has units of length and
         is given in meters.
     NoseCone.cl : Function
-        Function which defines the lift coefficient as a function of the angle
-        of attack and the Mach number. Takes as input the angle of attack in
-        radians and the Mach number. Returns the lift coefficient.
+        Roll-moment coefficient, inherited from the generic-surface model
+        (a function of the flow variables). Zero for a nose cone or tail; for a
+        fin set it carries the cant forcing and roll damping. The lift-curve
+        slope is ``clalpha``.
     NoseCone.clalpha : float
-        Lift coefficient slope. Has units of 1/rad.
+        Normal-force coefficient slope. Has units of 1/rad.
     NoseCone.plots : plots.aero_surface_plots._NoseConePlots
         This contains all the plots methods. Use help(NoseCone.plots) to know
         more about it.
@@ -476,12 +477,7 @@ class NoseCone(_BarrowmanSurface):
         self.clalpha = Function(
             lambda mach: 2 * self.radius_ratio**2,
             "Mach",
-            f"Lift coefficient derivative for {self.name}",
-        )
-        self.cl = Function(
-            lambda alpha, mach: self.clalpha(mach) * alpha,
-            ["Alpha (rad)", "Mach"],
-            "Cl",
+            f"Normal-force coefficient derivative for {self.name}",
         )
 
     def evaluate_k(self):
@@ -563,15 +559,10 @@ class NoseCone(_BarrowmanSurface):
         }
         if kwargs.get("include_outputs", False):
             clalpha = self.clalpha
-            cl = self.cl
             if kwargs.get("discretize", False):
                 clalpha = clalpha.set_discrete(0, 4, 50)
-                cl = cl.set_discrete(
-                    (-np.pi / 6, 0), (np.pi / 6, 2), (10, 10), mutate_self=False
-                )
             data["cp"] = self.cp
             data["clalpha"] = clalpha
-            data["cl"] = cl
 
         return data
 

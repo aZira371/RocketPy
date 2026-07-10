@@ -1,10 +1,11 @@
 """Regression tests for the GenericSurface-rooted aerodynamic hierarchy.
 
-After the refactor, every aerodynamic surface (Barrowman or generic) is
-described by the generic coefficient model and exposes the diagnostic accessors
-``lift_coefficient_derivative`` and ``center_of_pressure_z`` used by the rocket's
-center-of-pressure / stability-margin computation. These tests pin the
-properties that the refactor is meant to guarantee.
+After the refactor, every aerodynamic surface (Barrowman or generic) exposes
+the coefficient derivatives ``cN_alpha``/``cY_beta`` and the
+``center_of_pressure_z`` accessor used by the rocket's center-of-pressure /
+stability-margin computation. (Barrowman surfaces still compute their flight
+forces with the classic geometric method; the derivatives feed only the
+stability diagnostics.) These tests pin the properties the refactor guarantees.
 """
 
 import warnings
@@ -16,9 +17,8 @@ from rocketpy import LinearGenericSurface, NoseCone, Tail, TrapezoidalFins
 
 
 def test_barrowman_derived_cp_matches_geometric_cp():
-    """The derived ``center_of_pressure_z`` must reproduce the geometric cp of
-    each Barrowman surface (the moment is carried by ``cm`` but the diagnostic
-    must recover the original location)."""
+    """The derived ``center_of_pressure_z`` diagnostic must reproduce the
+    geometric cp of each Barrowman surface."""
     nose = NoseCone(
         length=0.55829, kind="vonkarman", base_radius=0.0635, rocket_radius=0.0635
     )
@@ -37,9 +37,9 @@ def test_barrowman_derived_cp_matches_geometric_cp():
                 )
                 == surface.cpz
             )
-        # The normal-force slope diagnostic must equal the Barrowman clalpha.
+        # The normal-force slope derivative must equal the Barrowman clalpha.
         assert pytest.approx(
-            nose.lift_coefficient_derivative.get_value_opt(0.0)
+            nose.cN_alpha.get_value_opt(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         ) == nose.clalpha.get_value_opt(0.0)
 
 
@@ -56,7 +56,7 @@ def test_generic_surface_contributes_to_static_margin(calisto_motorless):
         reference_area=rocket.area,
         reference_length=2 * rocket.radius,
         coefficients={
-            "cL_alpha": lambda a, b, m, re, p, q, r: 2.0,
+            "cN_alpha": lambda a, b, m, re, p, q, r: 2.0,
             "cm_alpha": lambda a, b, m, re, p, q, r: -1.0,
         },
         name="generic_fins",
@@ -78,7 +78,7 @@ def test_zero_lift_surface_does_not_break_cp(calisto_motorless):
     drag_only = LinearGenericSurface(
         reference_area=rocket.area,
         reference_length=2 * rocket.radius,
-        coefficients={"cD_0": lambda a, b, m, re, p, q, r: 0.5},
+        coefficients={"cA_0": lambda a, b, m, re, p, q, r: 0.5},
         name="drag_only",
     )
     rocket.add_surfaces(drag_only, positions=-1.0)
@@ -123,9 +123,9 @@ def test_non_axisymmetric_rocket_splits_margins_and_warns(calisto_motorless):
         reference_area=rocket.area,
         reference_length=2 * rocket.radius,
         coefficients={
-            "cL_alpha": lambda a, b, m, re, p, q, r: 2.0,
+            "cN_alpha": lambda a, b, m, re, p, q, r: 2.0,
             "cm_alpha": lambda a, b, m, re, p, q, r: -1.0,
-            "cQ_beta": lambda a, b, m, re, p, q, r: -2.0,
+            "cY_beta": lambda a, b, m, re, p, q, r: -2.0,
             "cn_beta": lambda a, b, m, re, p, q, r: 2.0,
         },
         name="asym",
@@ -137,27 +137,28 @@ def test_non_axisymmetric_rocket_splits_margins_and_warns(calisto_motorless):
     with pytest.warns(UserWarning, match="not\\s+axisymmetric"):
         ac_pitch = rocket.aerodynamic_center.get_value_opt(0.2)
 
-    assert ac_pitch != pytest.approx(
-        rocket.aerodynamic_center_yaw.get_value_opt(0.2)
-    )
+    assert ac_pitch != pytest.approx(rocket.aerodynamic_center_yaw.get_value_opt(0.2))
     assert rocket.static_margin.get_value_opt(0) != pytest.approx(
         rocket.static_margin_yaw.get_value_opt(0)
     )
 
 
-def test_barrowman_surface_uses_generic_compute_path():
-    """Barrowman surfaces must route through the shared generic
-    ``compute_forces_and_moments`` (no bespoke override) and apply their force
-    at the origin (moment carried by the coefficients)."""
+def test_barrowman_surface_uses_geometric_compute_path():
+    """Barrowman surfaces compute their normal force and moment with the classic
+    Barrowman method (their own ``compute_forces_and_moments``): the resultant
+    force is reported at the geometric center of pressure and its moment is
+    transported geometrically from there."""
+    from rocketpy.rocket.aero_surface._barrowman_surface import _BarrowmanSurface
     from rocketpy.rocket.aero_surface.generic_surface import GenericSurface
 
     nose = NoseCone(
         length=0.55829, kind="vonkarman", base_radius=0.0635, rocket_radius=0.0635
     )
     assert isinstance(nose, GenericSurface)
-    # Force is applied at the origin; the cp offset lives in cm/cn.
-    assert tuple(nose.force_application_point) == (0, 0, 0)
+    # Force is reported at the surface's geometric center of pressure.
+    assert tuple(nose.force_application_point) == (nose.cpx, nose.cpy, nose.cpz)
+    # Uses the Barrowman geometric compute, not the generic coefficient path.
     assert (
         nose.compute_forces_and_moments.__func__
-        is GenericSurface.compute_forces_and_moments
+        is _BarrowmanSurface.compute_forces_and_moments
     )

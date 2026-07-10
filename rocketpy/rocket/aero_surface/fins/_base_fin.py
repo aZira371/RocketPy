@@ -73,7 +73,7 @@ class _BaseFin(_BarrowmanSurface):
             # Geometry changed after construction: refresh the coefficients.
             self.evaluate_coefficients()
             self.compute_all_coefficients()
-            self._evaluate_derived_coefficients()
+            self._evaluate_stability_derivatives()
         else:
             self._finalize_barrowman()
 
@@ -320,7 +320,7 @@ class _BaseFin(_BarrowmanSurface):
             2 * np.pi * self.AR / (clalpha2D * np.cos(self.gamma_c))
         )
 
-        # Lift coefficient derivative for a single fin
+        # Normal-force coefficient derivative for a single fin
         def lift_source(mach):
             return (
                 clalpha2D(mach)
@@ -336,7 +336,7 @@ class _BaseFin(_BarrowmanSurface):
         self.clalpha_single_fin = Function(
             lift_source,
             "Mach",
-            "Lift coefficient derivative for a single fin",
+            "Normal-force coefficient derivative for a single fin",
         )
 
     @abstractmethod

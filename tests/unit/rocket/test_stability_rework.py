@@ -30,7 +30,7 @@ def test_reconstructed_center_of_pressure_converges_to_aerodynamic_center(
     cdm = rocket.center_of_dry_mass_position
 
     coeffs = rocket.aerodynamic_coefficients_full(np.radians(0.1), 0.0, mach)
-    reconstructed_cp = cdm + csys * diameter * coeffs["cm"] / coeffs["cL"]
+    reconstructed_cp = cdm + csys * diameter * coeffs["cm"] / coeffs["cN"]
     assert reconstructed_cp == pytest.approx(aerodynamic_center, abs=1e-3)
 
 
@@ -57,17 +57,18 @@ def test_axisymmetric_rocket_planes_coincide(calisto_robust):
 
 
 def test_aerodynamic_coefficients_full_signed_set(calisto_robust):
-    """The full rocket coefficient set returns all six signed coefficients;
-    lift grows with alpha, drag comes from the vehicle drag curve, and the pitch
-    moment is restoring (negative) for a stable rocket."""
+    """The full rocket coefficient set returns all six signed body-frame
+    coefficients; normal force grows with alpha, axial force comes from the
+    vehicle drag curve, and the pitch moment is restoring (negative) for a
+    stable rocket."""
     rocket = calisto_robust
     coeffs = rocket.aerodynamic_coefficients_full(np.radians(5), 0.0, 0.3)
-    assert set(coeffs) == {"cL", "cQ", "cD", "cm", "cn", "cl"}
+    assert set(coeffs) == {"cN", "cY", "cA", "cm", "cn", "cl"}
 
     low = rocket.aerodynamic_coefficients_full(np.radians(2), 0.0, 0.3)
-    assert coeffs["cL"] > low["cL"] > 0
+    assert coeffs["cN"] > low["cN"] > 0
     assert coeffs["cm"] < 0  # restoring pitch moment about the center of dry mass
-    assert coeffs["cD"] == pytest.approx(
+    assert coeffs["cA"] == pytest.approx(
         rocket.power_off_drag_by_mach.get_value_opt(0.3)
     )
 
@@ -76,18 +77,18 @@ def test_add_vehicle_aerodynamic_surface(calisto_robust):
     """A supplied full-vehicle coefficient set is added as a single generic
     surface and contributes to the rocket aggregate (rocket-as-GenericSurface)."""
     rocket = calisto_robust
-    base_cl = rocket.aerodynamic_coefficients_full(np.radians(5), 0.0, 0.3)["cL"]
+    base_cn = rocket.aerodynamic_coefficients_full(np.radians(5), 0.0, 0.3)["cN"]
     n_before = len(rocket.aerodynamic_surfaces)
 
     surface = rocket.add_vehicle_aerodynamic_surface(
-        coefficients={"cL": lambda a, b, m, re, p, q, r: 2.0 * a}
+        coefficients={"cN": lambda a, b, m, re, p, q, r: 2.0 * a}
     )
 
     assert len(rocket.aerodynamic_surfaces) == n_before + 1
     # The vehicle surface exposes the uniform coefficient accessors.
-    assert surface.cL(np.radians(5), 0, 0.3, 0, 0, 0, 0) == pytest.approx(
+    assert surface.cN(np.radians(5), 0, 0.3, 0, 0, 0, 0) == pytest.approx(
         2.0 * np.radians(5)
     )
-    # Its lift adds to the rocket aggregate.
-    new_cl = rocket.aerodynamic_coefficients_full(np.radians(5), 0.0, 0.3)["cL"]
-    assert new_cl > base_cl
+    # Its normal force adds to the rocket aggregate.
+    new_cn = rocket.aerodynamic_coefficients_full(np.radians(5), 0.0, 0.3)["cN"]
+    assert new_cn > base_cn

@@ -794,10 +794,10 @@ class _RocketPlots:
         for angle in angles:
             if plane == "yz":
                 coeffs = rocket.aerodynamic_coefficients_full(0.0, angle, 0.0)
-                force, moment = coeffs["cQ"], coeffs["cn"]
+                force, moment = coeffs["cY"], coeffs["cn"]
             else:
                 coeffs = rocket.aerodynamic_coefficients_full(angle, 0.0, 0.0)
-                force, moment = coeffs["cL"], coeffs["cm"]
+                force, moment = coeffs["cN"], coeffs["cm"]
             if force == 0:
                 continue
             position = cdm + csys * diameter * moment / force
