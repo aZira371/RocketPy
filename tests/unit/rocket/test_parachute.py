@@ -111,26 +111,70 @@ class TestParachuteSerialization:
         assert parachute.drag_coefficient == pytest.approx(1.4)
 
 
-class TestParachuteAbstractBase:
-    """After the PR #958 refactor, ``Parachute`` is an abstract base class and
-    users must instantiate a concrete model such as ``HemisphericalParachute``."""
+class TestParachuteClassHierarchy:
+    """``Parachute`` is a concrete generic class, keeping backward
+    compatibility with pre-v1.13.0 user code, and ``HemisphericalParachute``
+    is a geometry-specific subclass that does not expose the ``noise``
+    parameter."""
 
-    def test_parachute_abstract_base_cannot_be_instantiated(self):
-        """Instantiating the abstract ``Parachute`` base directly must raise a
-        ``TypeError`` (unimplemented abstract methods)."""
-        with pytest.raises(TypeError, match="abstract"):
-            # pylint: disable=abstract-class-instantiated,unexpected-keyword-arg
-            # pylint: disable=no-value-for-parameter
-            Parachute(
+    def test_generic_parachute_is_concrete_and_instantiable(self):
+        """The generic ``Parachute`` must be directly instantiable with its
+        historical signature and behave like the hemispherical model."""
+        parachute = Parachute(
+            name="test",
+            cd_s=10.0,
+            trigger="apogee",
+            sampling_rate=100,
+        )
+        assert parachute.parachute_type == "generic"
+        assert parachute.radius == pytest.approx(np.sqrt(10.0 / (1.4 * np.pi)))
+
+    def test_generic_parachute_accepts_noise(self):
+        """The generic ``Parachute`` must keep the historical ``noise``
+        parameter for backward compatibility."""
+        parachute = Parachute(
+            name="test",
+            cd_s=10.0,
+            trigger="apogee",
+            sampling_rate=100,
+            noise=(0, 8.3, 0.5),
+        )
+        assert parachute.noise_bias == 0
+        assert parachute.noise_deviation == pytest.approx(8.3)
+
+    def test_hemispherical_parachute_rejects_noise(self):
+        """``HemisphericalParachute`` must not expose the ``noise`` parameter;
+        sensors should be used to simulate noisy trigger readings instead."""
+        with pytest.raises(TypeError):
+            # pylint: disable=unexpected-keyword-arg
+            HemisphericalParachute(
                 name="test",
                 cd_s=10.0,
                 trigger="apogee",
                 sampling_rate=100,
+                noise=(0, 8.3, 0.5),
             )
 
     def test_hemispherical_parachute_is_a_parachute_subclass(self):
-        """The concrete ``HemisphericalParachute`` must derive from the abstract
-        ``Parachute`` base."""
+        """``HemisphericalParachute`` must derive from the generic
+        ``Parachute`` class."""
         assert issubclass(HemisphericalParachute, Parachute)
         parachute = _make_parachute()
         assert isinstance(parachute, Parachute)
+        assert parachute.parachute_type == "hemispherical"
+
+    def test_generic_parachute_from_dict_round_trip(self):
+        """A generic ``Parachute`` serialized with to_dict must be restored
+        by ``Parachute.from_dict``, including the ``noise`` field."""
+        original = Parachute(
+            name="test",
+            cd_s=5.0,
+            trigger="apogee",
+            sampling_rate=100,
+            noise=(0, 8.3, 0.5),
+        )
+        restored = Parachute.from_dict(original.to_dict())
+        assert restored.parachute_type == "generic"
+        assert restored.cd_s == pytest.approx(original.cd_s)
+        assert restored.noise == original.noise
+        assert restored.radius == pytest.approx(original.radius)

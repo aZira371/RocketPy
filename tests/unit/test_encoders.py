@@ -12,13 +12,13 @@ from rocketpy.rocket.parachutes import HemisphericalParachute, Parachute
 
 def test_get_class_from_signature_remaps_legacy_parachute():
     """The legacy ``rocketpy.rocket.parachute.Parachute`` signature must remap to
-    the concrete ``HemisphericalParachute`` (the old module was moved and the
-    class became abstract)."""
+    ``Parachute`` in its new location (the old module was moved to the
+    ``rocketpy.rocket.parachutes`` subpackage)."""
     legacy_signature = {
         "module": "rocketpy.rocket.parachute",
         "name": "Parachute",
     }
-    assert get_class_from_signature(legacy_signature) is HemisphericalParachute
+    assert get_class_from_signature(legacy_signature) is Parachute
 
 
 def test_decode_legacy_parachute_rpy_reconstructs_object():
@@ -43,10 +43,10 @@ def test_decode_legacy_parachute_rpy_reconstructs_object():
     decoded = json.loads(json.dumps(legacy_entry), cls=RocketPyDecoder)
 
     assert isinstance(decoded, Parachute)
-    assert isinstance(decoded, HemisphericalParachute)
     assert decoded.name == "drogue"
     assert decoded.cd_s == 1.0
     assert decoded.lag == 1.5
+    assert decoded.noise_deviation == 8.3
     assert callable(decoded.triggerfunc)
 
 

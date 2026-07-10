@@ -10,7 +10,7 @@ from rocketpy import (
     Environment,
     Flight,
     Function,
-    HemisphericalParachute,
+    Parachute,
     Rocket,
     SolidMotor,
 )
@@ -139,7 +139,7 @@ def test_bella_lui_rocket_data_asserts_acceptance():
         # activate drogue when vz < 0 m/s.
         return True if y[5] < 0 else False
 
-    drogue = HemisphericalParachute(
+    drogue = Parachute(
         "Drogue",
         cd_s=parameters.get("CdS_drogue")[0],
         trigger=drogue_trigger,
