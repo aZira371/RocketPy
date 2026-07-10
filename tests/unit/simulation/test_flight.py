@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from scipy import optimize
 
-from rocketpy import Components, Flight, Function, Rocket
+from rocketpy import Components, Flight, Function, LinearGenericSurface, Rocket
 
 plt.rcParams.update({"figure.max_open_warning": 0})
 
@@ -646,6 +646,46 @@ def test_stability_static_margins(
         assert np.all(moments / wind_sign <= 0)
     else:  # static_margin == 0
         assert np.all(np.abs(moments) <= 1e-10)
+
+
+def test_linear_generic_surface_flight_is_stable(
+    calisto_linear_generic, example_plain_env
+):
+    """A Calisto whose fin set is a body-frame LinearGenericSurface flies stably.
+
+    The linear surface builds its forces and moments directly in the body frame
+    from the coefficient derivatives (no wind-to-body rotation). With a positive
+    normal-force slope placed aft it must give a positive static margin and the
+    rocket must reach a finite apogee while staying aligned with the flow (a
+    small angle of attack, i.e. no tumbling).
+    """
+    rocket = calisto_linear_generic
+    assert any(
+        isinstance(surface, LinearGenericSurface)
+        for surface, _ in rocket.aerodynamic_surfaces
+    )
+    assert rocket.static_margin(0) > 0
+
+    test_flight = Flight(
+        environment=example_plain_env,
+        rocket=rocket,
+        rail_length=5.2,
+        inclination=85,
+        heading=0,
+        terminate_on_apogee=True,
+    )
+
+    assert test_flight.apogee_time > test_flight.out_of_rail_time
+    assert np.isfinite(test_flight.apogee)
+    assert test_flight.apogee > example_plain_env.elevation
+    # A stable rocket keeps a small angle of attack throughout the ascent. Only
+    # the ascent off the rail is checked: while the rocket is still on the rail
+    # its speed is ~0, so the angle of attack is reported as a degenerate 90
+    # degrees (arccos of 0) for every launcher, stable or not.
+    aoa_source = test_flight.angle_of_attack.get_source()
+    ascent = aoa_source[:, 0] > test_flight.out_of_rail_time
+    angle_of_attack = aoa_source[ascent, 1]
+    assert np.nanmax(np.abs(angle_of_attack)) < 45
 
 
 def test_max_acceleration_power_off_time_with_controllers(
