@@ -111,6 +111,72 @@ Where:
   Commonly the rocket's diameter is used as the reference length.
 
 
+Wind-frame and body-frame force coefficients
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The three force coefficients above are given in the **aerodynamic (wind) frame**,
+relative to the velocity vector:
+
+- :math:`C_L` (lift), :math:`C_Q` (side force) and :math:`C_D` (drag).
+
+The same force can be expressed in the **body frame**, relative to the rocket's
+axes, which is what tools such as Missile DATCOM, wind tunnels and Barrowman
+report:
+
+- :math:`C_N` (normal force, perpendicular to the body axis),
+- :math:`C_Y` (body side force),
+- :math:`C_A` (axial force, along the body axis).
+
+The two sets are the same force in different frames, related by the
+angle-of-attack/sideslip rotation :math:`\mathbf{M}_{BA}`:
+
+.. math::
+   \begin{aligned}
+      C_N &= \cos\alpha\, C_L + \sin\alpha\,(\sin\beta\, C_Q + \cos\beta\, C_D) \\
+      C_Y &= \cos\beta\, C_Q - \sin\beta\, C_D \\
+      C_A &= -\sin\alpha\, C_L + \cos\alpha\,(\sin\beta\, C_Q + \cos\beta\, C_D)
+   \end{aligned}
+
+At small angles these reduce to :math:`C_N \approx C_L`, :math:`C_Y \approx C_Q`
+and :math:`C_A \approx C_D`.
+
+Every aerodynamic surface exposes **all nine** coefficients as attributes
+(``cL``, ``cQ``, ``cD``, ``cN``, ``cY``, ``cA``, ``cm``, ``cn``, ``cl``). The
+coefficients you did not provide are computed on demand from the ones you did,
+so you can always read a surface's forces in whichever frame you need, for
+example ``surface.cN`` for the normal-force coefficient.
+
+**Choosing the input frame.** Because rocket aerodynamic data (DATCOM, wind
+tunnel, CFD, Barrowman) is usually reported in the body frame, you can supply
+your coefficients in either frame and RocketPy converts them for you. Provide the
+wind-frame names (``cL``/``cQ``/``cD``) or the body-frame names
+(``cN``/``cY``/``cA``); the moment coefficients (``cm``/``cn``/``cl``) are the
+same in both.
+
+Moment reference point
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The moment coefficients :math:`C_m`, :math:`C_n` and :math:`C_l` are taken about
+the surface's own reference point (its ``center_of_pressure``). When the rocket
+assembles the total aerodynamic moment it transports each surface's force from
+that point to the rocket's **center of dry mass**, adding the
+:math:`\vec{r}_{\text{cp} \to \text{cdm}} \times \vec{F}` term, so the rocket's
+reported pitch/yaw moment and static margin are about the center of dry mass.
+
+This matters when your coefficients come from a source that uses a different
+reference. Aerodynamic decks frequently give the pitch moment **about the nose
+tip** (or another fixed station) rather than about the center of dry mass. A
+pitch-moment coefficient referenced to a point a distance :math:`d` ahead of the
+surface's center of pressure must be shifted before use:
+
+.. math::
+   C_{m,\,\text{cp}} = C_{m,\,\text{ref}} + \frac{d}{L_{ref}}\, C_N
+
+Provide the coefficient about the surface's center of pressure (or set
+``center_of_pressure`` so the transport lands the moment at the intended point);
+otherwise the static margin will be off by the reference-point offset.
+
+
 Aerodynamic angles
 ~~~~~~~~~~~~~~~~~~
 
@@ -263,7 +329,18 @@ independent variables:
 - ``yaw_rate``: Yaw rate.
 - ``roll_rate``: Roll rate.
 
-The last column must be the coefficient value, and must contain a header, 
+When the surface is created with ``unsteady_aero=True``, the coefficients may
+additionally depend on the time derivatives of the flow angles, appended after
+``roll_rate``:
+
+- ``alpha_dot``: Rate of change of the angle of attack.
+- ``beta_dot``: Rate of change of the side slip angle.
+
+Callables must then accept the two extra trailing arguments
+(``coefficient(alpha, beta, Ma, Re, q, r, p, alpha_dot, beta_dot)``) and
+``.csv`` files may include ``alpha_dot``/``beta_dot`` columns.
+
+The last column must be the coefficient value, and must contain a header,
 though the header name can be anything.
 
 .. important::
@@ -449,5 +526,113 @@ shown below:
          },
       )
       rocket.add_surfaces(linear_generic_surface, position=(0,0,0))
+
+
+.. _generic_surface_interpolation:
+
+Interpolation and Extrapolation of Tabulated Coefficients
+---------------------------------------------------------
+
+When a coefficient is provided as tabulated data (a ``.csv`` file or a list of
+points), RocketPy stores it as a :class:`rocketpy.Function` and must decide two
+things: how to **interpolate** *between* the tabulated points, and how to
+**extrapolate** *outside* the tabulated range. Both :class:`rocketpy.GenericSurface`
+and :class:`rocketpy.LinearGenericSurface` (and
+:class:`rocketpy.ControllableGenericSurface`) expose these as the
+``interpolation`` and ``extrapolation`` arguments.
+
+.. note::
+   Interpolation and extrapolation only apply to **tabulated** coefficients.
+   A coefficient given as a constant or a callable is evaluated directly, so
+   these settings have no effect on it (a callable is assumed valid over its
+   whole domain).
+
+Each argument accepts either:
+
+- a **single string**, applied to every coefficient of the surface; or
+- a **dictionary** keyed by coefficient name, setting the method per
+  coefficient. Coefficients omitted from the dictionary keep the default.
+
+.. code-block:: python
+
+   from rocketpy import GenericSurface
+
+   radius = 0.0635
+   generic_surface = GenericSurface(
+      reference_area=np.pi * radius**2,
+      reference_length=2 * radius,
+      coefficients={
+         "cD": "cD.csv",
+         "cL": "cL.csv",
+      },
+      # A single method applied to every coefficient:
+      extrapolation="constant",
+      # ... or per coefficient (unlisted ones keep the default):
+      interpolation={"cD": "linear", "cL": "akima"},
+   )
+
+Choosing an interpolation method
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Interpolation controls the behavior *between* tabulated points. For 1-D tables
+the options are ``"linear"``, ``"akima"``, ``"spline"`` and ``"polynomial"``.
+
+- ``"linear"`` (**default**) is the safe choice. It never overshoots and
+  introduces no spurious oscillations, which matters most across the
+  **transonic drag rise** (:math:`Ma \approx 0.8`–:math:`1.2`), where a spline
+  will oscillate and invent non-physical wiggles in :math:`C_D`. Prefer it for
+  coarse tables and for anything with a sharp feature.
+- ``"akima"`` gives continuous first derivatives (smoother
+  :math:`C_{m_\alpha}`, cleaner stability curves) while resisting the overshoot
+  of a natural cubic spline near kinks. It is the best "smooth" option for
+  **dense, smooth** data, such as lift/moment slopes in the attached-flow
+  region.
+- ``"spline"`` produces the smoothest derivatives but overshoots near sharp
+  features (stall, :math:`Ma = 1`). Use it only for genuinely smooth,
+  well-resolved data.
+
+A practical rule of thumb: use ``"linear"`` against Mach (transonic kinks) and
+``"akima"`` against angle of attack / sideslip when you have fine data and care
+about smooth derivatives.
+
+.. note::
+   Multi-dimensional CSV tables that form a strict Cartesian grid are read with
+   a :class:`scipy.interpolate.RegularGridInterpolator`. The ``interpolation``
+   argument still applies: it is mapped onto the interpolator's method, with
+   ``"spline"`` becoming ``"cubic"`` and ``"akima"`` becoming the
+   shape-preserving ``"pchip"`` (``"linear"`` stays linear). Smooth methods need
+   enough samples per axis (``"cubic"`` needs at least 4), otherwise SciPy
+   raises.
+
+Choosing an extrapolation method
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Extrapolation controls the behavior *outside* the tabulated range. The options
+are ``"constant"``, ``"natural"`` and ``"zero"``. This choice matters more than
+interpolation, because a bad one fails silently, precisely when the rocket is at
+an extreme condition beyond your data.
+
+- ``"constant"`` holds the value at the nearest edge of the data. This is the
+  **default for tabulated coefficients**, and the right choice for essentially
+  all of them: a rocket can briefly exceed your tabulated Mach/angle range, and
+  holding the last value is bounded and physically conservative.
+- ``"zero"`` returns 0 outside the range. Occasionally reasonable for force or
+  moment *slopes* if you want contributions to vanish past the modeled envelope,
+  but it introduces a discontinuity at the edge.
+- ``"natural"`` continues the fitted curve past the data. **Avoid this for
+  tabulated coefficients**: extrapolating a linear or spline fit can send
+  :math:`C_D` or a moment slope to large, non-physical values right when the
+  rocket is at an extreme condition.
+
+.. tip::
+   Tabulated coefficients default to ``extrapolation="constant"`` so they never
+   run to non-physical values past the tabulated envelope. Override it only when
+   you have a specific reason (e.g. ``"zero"`` to make a contribution vanish
+   outside the modeled range).
+
+.. seealso::
+   These arguments are forwarded to each :class:`rocketpy.Function`; see
+   :meth:`rocketpy.Function.set_interpolation` and
+   :meth:`rocketpy.Function.set_extrapolation` for the full list of methods.
 
 
