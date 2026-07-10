@@ -35,7 +35,6 @@ from rocketpy.rocket.aero_surface.fins.free_form_fins import FreeFormFins
 from rocketpy.rocket.aero_surface.fins.trapezoidal_fin import TrapezoidalFin
 from rocketpy.rocket.aero_surface.generic_surface import GenericSurface
 from rocketpy.rocket.components import Components
-from rocketpy.rocket.parachutes.hemispherical_parachute import HemisphericalParachute
 from rocketpy.rocket.parachutes.parachute import Parachute
 from rocketpy.tools import (
     deprecated,
@@ -1746,8 +1745,9 @@ class Rocket:
         if parachute is not None:
             if not isinstance(parachute, Parachute):
                 raise TypeError(
-                    "The 'parachute' argument must be an instance of a Parachute "
-                    "subclass (e.g. 'HemisphericalParachute')."
+                    "The 'parachute' argument must be an instance of the "
+                    "'Parachute' class or one of its subclasses (e.g. "
+                    "'HemisphericalParachute')."
                 )
             self.parachutes.append(parachute)
         else:
@@ -1755,8 +1755,9 @@ class Rocket:
             deprecation_message = (
                 "Passing parachute parameters directly to 'add_parachute' method is "
                 + "deprecated and will be removed in version 1.14.0. Please create "
-                + "an object of class 'HemisphericalParachute' and pass it to the "
-                + "'parachute' argument of 'add_parachute' for the same behavior."
+                + "an object of class 'Parachute' (or one of its subclasses) and "
+                + "pass it to the 'parachute' argument of 'add_parachute' for the "
+                + "same behavior."
             )
             warn(message=deprecation_message, category=FutureWarning, stacklevel=2)
             if name is None:
@@ -1767,7 +1768,7 @@ class Rocket:
                 raise ValueError(
                     "Invalid 'trigger' argument! Please provide a callable, float, or string!"
                 )
-            legacy_parachute = HemisphericalParachute(
+            legacy_parachute = Parachute(
                 name,
                 cd_s,
                 trigger,

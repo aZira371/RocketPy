@@ -1,10 +1,10 @@
 """Backward-compatibility shim for the relocated parachute module.
 
 The parachute classes moved from ``rocketpy.rocket.parachute`` to the
-``rocketpy.rocket.parachutes`` subpackage, and the old concrete ``Parachute``
-class became an abstract base with the hemispherical model split out into
-``HemisphericalParachute``. Importing from this module still works for backward
-compatibility but is deprecated and will be removed in v1.15.0.
+``rocketpy.rocket.parachutes`` subpackage, which holds the generic
+``Parachute`` class and geometry-specific models such as
+``HemisphericalParachute``. Importing from this module still works for
+backward compatibility but is deprecated and will be removed in v1.15.0.
 """
 
 import warnings
@@ -15,7 +15,7 @@ from .parachutes.parachute import Parachute
 warnings.warn(
     "Importing from 'rocketpy.rocket.parachute' is deprecated and will be "
     "removed in v1.15.0. Import from 'rocketpy.rocket.parachutes' instead, "
-    "e.g. 'from rocketpy.rocket.parachutes import HemisphericalParachute'.",
+    "e.g. 'from rocketpy.rocket.parachutes import Parachute'.",
     DeprecationWarning,
     stacklevel=2,
 )

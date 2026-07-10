@@ -250,14 +250,11 @@ def get_class_from_signature(signature):
     name = signature["name"]
 
     # Backward compatibility: the parachute module was moved to the
-    # ``rocketpy.rocket.parachutes`` subpackage and the old concrete
-    # ``Parachute`` class became an abstract base, with the hemispherical model
-    # split out. Remap the legacy signature so ``.rpy`` files saved with older
-    # versions reconstruct as a concrete ``HemisphericalParachute`` instead of
-    # silently falling back to a raw dictionary.
+    # ``rocketpy.rocket.parachutes`` subpackage. Remap the legacy signature so
+    # ``.rpy`` files saved with older versions import ``Parachute`` from its
+    # new location instead of silently falling back to a raw dictionary.
     if module_name == "rocketpy.rocket.parachute" and name == "Parachute":
-        module_name = "rocketpy.rocket.parachutes.hemispherical_parachute"
-        name = "HemisphericalParachute"
+        module_name = "rocketpy.rocket.parachutes.parachute"
 
     module = import_module(module_name)
     inner_class = None

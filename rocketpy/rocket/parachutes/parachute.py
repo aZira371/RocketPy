@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 from inspect import signature
 
 import numpy as np
@@ -9,9 +8,13 @@ from ...mathutils.function import Function
 from ...prints.parachute_prints import _ParachutePrints
 
 
-class Parachute(ABC):
-    """Abstract class to specify characteristics and useful operations for
-    parachutes. Cannot be instantiated.
+class Parachute:
+    """Generic parachute model. Specifies the characteristics and useful
+    operations of a parachute, including its descent dynamics.
+
+    Specific canopy geometries may be modeled by subclasses, such as
+    :class:`HemisphericalParachute
+    <rocketpy.rocket.parachutes.hemispherical_parachute.HemisphericalParachute>`.
 
     Attributes
     ----------
@@ -20,7 +23,10 @@ class Parachute(ABC):
         simulation, as it is only used to display data in a more
         organized matter.
     Parachute.parachute_type : string
-        Parachute type, such as hemispherical and parafoil.
+        Parachute type, such as generic and hemispherical.
+    Parachute.cd_s : float
+        Drag coefficient times reference area for parachute. It has units of
+        area and must be given in squared meters.
     Parachute.trigger : callable, float, str
         This parameter defines the trigger condition for the parachute ejection
         system. It can be one of the following:
@@ -102,16 +108,45 @@ class Parachute(ABC):
         Function of noisy_pressure_signal.
     Parachute.clean_pressure_signal_function : Function
         Function of clean_pressure_signal.
+    Parachute.drag_coefficient : float
+        Drag coefficient of the inflated canopy shape, used only when
+        ``radius`` is not provided to estimate the parachute radius from
+        ``cd_s``: ``R = sqrt(cd_s / (drag_coefficient * pi))``. Typical
+        values: 1.4 for hemispherical canopies (default), 0.75 for flat
+        circular canopies, 1.5 for extended-skirt canopies.
+    Parachute.radius : float
+        Length of the non-unique semi-axis (radius) of the inflated
+        parachute in meters, used to compute the added mass of the dragged
+        air. If not provided at construction time, it is estimated from
+        ``cd_s`` and ``drag_coefficient``.
+    Parachute.height : float
+        Length of the unique semi-axis (height) of the inflated
+        parachute in meters. Default value is the radius of the parachute.
+    Parachute.porosity : float
+        Geometric porosity of the canopy (ratio of open area to total canopy
+        area), in [0, 1]. Affects only the added-mass scaling during descent;
+        it does not change ``cd_s`` (drag). The default value of 0.0432 is
+        chosen so that the resulting ``added_mass_coefficient`` equals
+        approximately 1.0 ("neutral" added-mass behavior).
+    Parachute.added_mass_coefficient : float
+        Coefficient used to calculate the added-mass due to dragged air. It is
+        calculated from the porosity of the parachute.
     """
+
+    parachute_type = "generic"
 
     def __init__(
         self,
         name,
-        parachute_type,
+        cd_s,
         trigger,
         sampling_rate,
         lag=0,
         noise=(0, 0, 0),
+        radius=None,
+        height=None,
+        porosity=0.0432,
+        drag_coefficient=1.4,
     ):
         """Initializes Parachute class.
 
@@ -121,8 +156,8 @@ class Parachute(ABC):
             Parachute name, such as drogue and main. Has no impact in
             simulation, as it is only used to display data in a more
             organized matter.
-        parachute_type : string
-            Parachute type, such as hemispherical and parafoil.
+        cd_s : float
+            Drag coefficient times reference area of the parachute.
         trigger : callable, float, str
             Defines the trigger condition for the parachute ejection system. It
             can be one of the following:
@@ -166,20 +201,76 @@ class Parachute(ABC):
             The values are used to add noise to the pressure signal which is
             passed to the trigger function. Default value is ``(0, 0, 0)``.
             Units are in Pa.
+        radius : float, optional
+            Length of the non-unique semi-axis (radius) of the inflated
+            parachute, used to compute the added mass of the dragged air.
+            If not provided, it is estimated from ``cd_s`` and
+            ``drag_coefficient`` using:
+            ``radius = sqrt(cd_s / (drag_coefficient * pi))``.
+            Units are in meters.
+        height : float, optional
+            Length of the unique semi-axis (height) of the inflated
+            parachute. Default value is the radius of the parachute.
+            Units are in meters.
+        porosity : float, optional
+            Geometric porosity of the canopy (ratio of open area to total
+            canopy area), in [0, 1]. Affects only the added-mass scaling
+            during descent; it does not change ``cd_s`` (drag). The default
+            value of 0.0432 is chosen so that the resulting
+            ``added_mass_coefficient`` equals approximately 1.0 ("neutral"
+            added-mass behavior).
+        drag_coefficient : float, optional
+            Drag coefficient of the inflated canopy shape, used only when
+            ``radius`` is not provided. It relates the aerodynamic ``cd_s``
+            to the physical canopy area via
+            ``cd_s = drag_coefficient * pi * radius**2``. Typical values:
+
+            - **1.4** — hemispherical canopy (default, NASA SP-8066)
+            - **0.75** — flat circular canopy
+            - **1.5** — extended-skirt canopy
+
+            Has no effect when ``radius`` is explicitly provided.
         """
 
         # Save arguments as attributes
         self.name = name
-        self.parachute_type = parachute_type
+        self.cd_s = cd_s
         self.trigger = trigger
         self.sampling_rate = sampling_rate
         self.lag = lag
         self.noise = noise
+        self.drag_coefficient = drag_coefficient
+        self.porosity = porosity
         self.__init_noise(noise)
         self.__evaluate_trigger_function(trigger)
 
+        # Initialize derived attributes
+        self.radius = self.__resolve_radius(radius, cd_s, drag_coefficient)
+        self.height = self.__resolve_height(height, self.radius)
+        self.added_mass_coefficient = self.__compute_added_mass_coefficient(
+            self.porosity
+        )
+
         # Prints and plots
         self.prints = _ParachutePrints(self)
+
+    def __resolve_radius(self, radius, cd_s, drag_coefficient):
+        """Resolves parachute radius from input or aerodynamic relation."""
+        if radius is not None:
+            return radius
+
+        # cd_s = Cd * S = Cd * pi * R^2  =>  R = sqrt(cd_s / (Cd * pi))
+        return np.sqrt(cd_s / (drag_coefficient * np.pi))
+
+    def __resolve_height(self, height, radius):
+        """Resolves parachute height defaulting to radius when not provided."""
+        return height or radius
+
+    def __compute_added_mass_coefficient(self, porosity):
+        """Computes the added-mass coefficient from canopy porosity."""
+        return 1.068 * (
+            1 - 1.465 * porosity - 0.25975 * porosity**2 + 1.2626 * porosity**3
+        )
 
     def __init_noise(self, noise):
         """Initializes all noise-related attributes.
@@ -322,15 +413,29 @@ class Parachute(ABC):
         """Prints all information about the Parachute class."""
         self.info()
 
-    @abstractmethod
     def add_information_to_flight(self, flight_obj, additional_info):
         """Adds parachute information to flight"""
+        drag = additional_info["drag"]
+        t = additional_info["t"]
+        if self.name not in flight_obj.parachutes_info.keys():
+            flight_obj.parachutes_info[self.name] = {"drag": [], "t": []}
+            flight_obj.parachutes_info[self.name]["drag"].append(drag)
+            flight_obj.parachutes_info[self.name]["t"].append(t)
+        else:
+            # LSODA did not accept last solution, we replace it
+            if t == flight_obj.parachutes_info[self.name]["t"][-1]:
+                flight_obj.parachutes_info[self.name]["drag"][-1] = drag
+                flight_obj.parachutes_info[self.name]["t"][-1] = t
+            else:
+                flight_obj.parachutes_info[self.name]["drag"].append(drag)
+                flight_obj.parachutes_info[self.name]["t"].append(t)
 
-    @abstractmethod
+    # pylint: disable=too-many-locals, too-many-statements
     def u_dot(self, t, u, flight_information, post_processing=False):
         """Calculates derivative of u state vector with respect to time
-        when rocket is flying under parachute. Each parachute type has
-
+        when rocket is flying under parachute. A 3 DOF approximation is
+        used. Subclasses may override this method to implement
+        geometry-specific descent dynamics.
 
         Parameters
         ----------
@@ -358,11 +463,85 @@ class Parachute(ABC):
             post processing information.
 
         """
+        # Get relevant state data
+        z, vx, vy, vz = u[2:6]
 
+        env = flight_information["env"]
+        rocket = flight_information["rocket"]
+
+        # Get atmospheric data
+        rho = env.density.get_value_opt(z)
+        wind_velocity_x = env.wind_velocity_x.get_value_opt(z)
+        wind_velocity_y = env.wind_velocity_y.get_value_opt(z)
+
+        # Get the mass of the rocket
+        mp = rocket.dry_mass
+
+        # Calculate added mass
+        ma = (
+            self.added_mass_coefficient
+            * rho
+            * (2 / 3)
+            * np.pi
+            * self.radius**2
+            * self.height
+        )
+
+        # Calculate freestream speed
+        freestream_x = vx - wind_velocity_x
+        freestream_y = vy - wind_velocity_y
+        freestream_z = vz
+        free_stream_speed = (freestream_x**2 + freestream_y**2 + freestream_z**2) ** 0.5
+
+        # Determine drag force
+        pseudo_drag = -0.5 * rho * self.cd_s * free_stream_speed
+        Dx = pseudo_drag * freestream_x
+        Dy = pseudo_drag * freestream_y
+        Dz = pseudo_drag * freestream_z
+        total_drag = np.sqrt(Dx**2 + Dy**2 + Dz**2)
+        ax = Dx / (mp + ma)
+        ay = Dy / (mp + ma)
+        az = (Dz - mp * env.gravity.get_value_opt(z)) / (mp + ma)
+
+        # Add coriolis acceleration
+        _, w_earth_y, w_earth_z = env.earth_rotation_vector
+        ax -= 2 * (vz * w_earth_y - vy * w_earth_z)
+        ay -= 2 * (vx * w_earth_z)
+        az -= 2 * (-vx * w_earth_y)
+
+        additional_info = {
+            "t": t,
+            "drag": total_drag,
+        }
+        output = {
+            "state": [vx, vy, vz, ax, ay, az, 0, 0, 0, 0, 0, 0, 0],
+            "additional_info": additional_info,
+        }
+
+        if post_processing:
+            output["post_processing_information"] = [
+                t,
+                ax,
+                ay,
+                az,
+                0,
+                0,
+                0,
+                Dx,
+                Dy,
+                Dz,
+                0,
+                0,
+                0,
+                0,
+            ]
+        return output
+
+    # serialization methods
     def to_dict(self, **kwargs):
-        """Serializes the fields shared by every parachute model. Subclasses
-        should call ``super().to_dict(**kwargs)`` and add their model-specific
-        attributes to the returned dictionary."""
+        """Serializes the parachute attributes. Subclasses should call
+        ``super().to_dict(**kwargs)`` and add their model-specific attributes
+        to the returned dictionary."""
         allow_pickle = kwargs.get("allow_pickle", True)
         trigger = self.trigger
 
@@ -379,6 +558,11 @@ class Parachute(ABC):
             "sampling_rate": self.sampling_rate,
             "lag": self.lag,
             "noise": self.noise,
+            "cd_s": self.cd_s,
+            "radius": self.radius,
+            "drag_coefficient": self.drag_coefficient,
+            "height": self.height,
+            "porosity": self.porosity,
         }
 
         if kwargs.get("include_outputs", False):
@@ -403,10 +587,19 @@ class Parachute(ABC):
             return trigger
 
     @classmethod
-    @abstractmethod
     def from_dict(cls, data):
-        """Reconstructs a parachute from a serialized dictionary.
-
-        Each concrete model must implement this using its own constructor,
-        since the required arguments differ per model. The shared
-        ``_decode_trigger`` helper handles the ``trigger`` field."""
+        """Reconstructs a parachute from a serialized dictionary. Subclasses
+        with different constructor arguments must override this method. The
+        shared ``_decode_trigger`` helper handles the ``trigger`` field."""
+        return cls(
+            name=data["name"],
+            cd_s=data["cd_s"],
+            trigger=cls._decode_trigger(data["trigger"]),
+            sampling_rate=data["sampling_rate"],
+            lag=data.get("lag", 0),
+            noise=data.get("noise", (0, 0, 0)),
+            radius=data.get("radius", None),
+            height=data.get("height", None),
+            porosity=data.get("porosity", 0.0432),
+            drag_coefficient=data.get("drag_coefficient", 1.4),
+        )
