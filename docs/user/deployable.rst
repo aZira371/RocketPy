@@ -8,7 +8,7 @@ Let's start by importing the rocketpy classes we will use.
 
 .. jupyter-execute::
 
-      from rocketpy import Environment, SolidMotor, Rocket, Flight, HemisphericalParachute
+      from rocketpy import Environment, SolidMotor, Rocket, Flight, Parachute
 
 
 Creating Environment
@@ -182,7 +182,7 @@ Therefore we should be careful with the value of its mass.
 
 
       # Define Parachutes for the rocket
-      main_chute = HemisphericalParachute(
+      main_chute = Parachute(
           "Main",
           cd_s=7.2,
           trigger=800,
@@ -191,7 +191,7 @@ Therefore we should be careful with the value of its mass.
           noise=(0, 8.3, 0.5),
       )
 
-      drogue_chute = HemisphericalParachute(
+      drogue_chute = Parachute(
           "Drogue",
           cd_s=0.72,
           trigger="apogee",
@@ -244,7 +244,7 @@ surfaces to stabilize it, nor a motor that ignites. It does, however, have parac
           center_of_mass_without_motor=0,
       )
 
-      payload_drogue = HemisphericalParachute(
+      payload_drogue = Parachute(
           "Drogue",
           cd_s=0.35,
           trigger="apogee",
@@ -253,7 +253,7 @@ surfaces to stabilize it, nor a motor that ignites. It does, however, have parac
           noise=(0, 8.3, 0.5),
       )
 
-      payload_main = HemisphericalParachute(
+      payload_main = Parachute(
           "Main",
           cd_s=4.0,
           trigger=800,

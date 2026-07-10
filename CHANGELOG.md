@@ -61,7 +61,7 @@ Attention: The newest changes should be on top -->
 - ENH: Adaptive Monte Carlo via Convergence Criteria [#922](https://github.com/RocketPy-Team/RocketPy/pull/922)
 - ENH: Auto-Detection of Pressure Conversion Factor [#966](https://github.com/RocketPy-Team/RocketPy/pull/966)
 - ENH: Introduce pressure unit conversion when using forecast/reanalysis/ensemble data [#955](https://github.com/RocketPy-Team/RocketPy/pull/955)
-- MNT: Refactor parachute implementation with abstract base and hemispherical model split [#958](https://github.com/RocketPy-Team/RocketPy/pull/958)
+- MNT: Move parachute classes to the `rocketpy.rocket.parachutes` subpackage and add the `HemisphericalParachute` model [#958](https://github.com/RocketPy-Team/RocketPy/pull/958)
 - DOC: Add aerodynamic surfaces user guide [#1043](https://github.com/RocketPy-Team/RocketPy/pull/1043)
 - DOC: Add Valkyrie flight example (Bisky Team) [#967](https://github.com/RocketPy-Team/RocketPy/pull/967)
 - DOC: Configure AI instructions and update developer docs [#975](https://github.com/RocketPy-Team/RocketPy/pull/975)
@@ -72,7 +72,7 @@ Attention: The newest changes should be on top -->
 ### Changed
 
 - REL: bumps up rocketpy version to 1.13.0 [#1048](https://github.com/RocketPy-Team/RocketPy/pull/1048)
-- MNT: **Breaking**: `Parachute` is now an abstract base class and can no longer be instantiated directly; use `HemisphericalParachute` (or `Rocket.add_parachute`, which builds it for you). Loading old serialized files still works [#958](https://github.com/RocketPy-Team/RocketPy/pull/958)
+- MNT: `Parachute` remains a concrete generic class, fully backward compatible with previous versions; the new `HemisphericalParachute` subclass implements the same model but does not expose the `noise` parameter (attach a noisy `Barometer` sensor instead) [#958](https://github.com/RocketPy-Team/RocketPy/pull/958)
 - MNT: Discrete controllers are now called exactly once per time node (previously twice); results may change for stateful controllers and `observed_variables` no longer contains duplicated entries [#949](https://github.com/RocketPy-Team/RocketPy/pull/949)
 - MNT: Multi-dimensional linear `Function` objects now apply their extrapolation rule to points outside the data's convex hull (previously returned NaN) [#969](https://github.com/RocketPy-Team/RocketPy/pull/969)
 - MNT: Informational messages previously shown with `print()` now use Python logging and are silent by default; call `rocketpy.utils.enable_logging()` to see them [#973](https://github.com/RocketPy-Team/RocketPy/pull/973)

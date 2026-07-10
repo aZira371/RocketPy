@@ -67,7 +67,7 @@ we will use from RocketPy:
 
 .. jupyter-execute::
 
-    from rocketpy import Environment, SolidMotor, Rocket, Flight, HemisphericalParachute
+    from rocketpy import Environment, SolidMotor, Rocket, Flight, Parachute
 
 .. note::
 
@@ -272,7 +272,7 @@ Finally, we can add any number of Parachutes to the ``Rocket`` object.
 
 .. jupyter-execute::
 
-    main = HemisphericalParachute(
+    main = Parachute(
         name="main",
         cd_s=10.0,
         trigger=800,      # ejection altitude in meters
@@ -284,7 +284,7 @@ Finally, we can add any number of Parachutes to the ``Rocket`` object.
         porosity=0.0432,
     )
 
-    drogue = HemisphericalParachute(
+    drogue = Parachute(
         name="drogue",
         cd_s=1.0,
         trigger="apogee",  # ejection at apogee

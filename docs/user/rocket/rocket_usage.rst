@@ -292,23 +292,26 @@ Optionally, we can also define:
 
 .. note::
 
-    Since v1.13.0, :class:`~rocketpy.Parachute` is an **abstract base class**
-    and can no longer be instantiated directly. Instead, instantiate a concrete
-    parachute model such as :class:`~rocketpy.HemisphericalParachute` (used
-    below), which derives its geometry-dependent quantities (e.g. the added
-    mass during descent) from the parachute ``radius`` and ``height``. As a
-    convenience shortcut, ``Rocket.add_parachute(...)`` can still be called with
-    keyword arguments (``name``, ``cd_s``, ``trigger``, ...) and will build a
-    hemispherical parachute for you.
+    Since v1.13.0, the parachute classes live in the
+    ``rocketpy.rocket.parachutes`` subpackage. The generic
+    :class:`~rocketpy.Parachute` class (used below) remains the default
+    choice and behaves exactly as in previous versions, deriving the added
+    mass during descent from the parachute ``radius`` and ``height``. A
+    geometry-specific :class:`~rocketpy.HemisphericalParachute` subclass is
+    also available; it implements the same model but does not expose the
+    ``noise`` parameter (attach a noisy sensor to the rocket instead). As a
+    convenience shortcut, ``Rocket.add_parachute(...)`` can still be called
+    with keyword arguments (``name``, ``cd_s``, ``trigger``, ...) and will
+    build a generic parachute for you.
 
 Lets add two parachutes to the rocket, one that will be deployed at
 apogee and another that will be deployed at 800 meters above ground level:
 
 .. jupyter-execute::
 
-    from rocketpy import HemisphericalParachute
+    from rocketpy import Parachute
 
-    main = HemisphericalParachute(
+    main = Parachute(
         name="Main",
         cd_s=10.0,
         trigger=800,
@@ -320,7 +323,7 @@ apogee and another that will be deployed at 800 meters above ground level:
         porosity=0.0432,
     )
 
-    drogue = HemisphericalParachute(
+    drogue = Parachute(
         name="Drogue",
         cd_s=1.0,
         trigger="apogee",
