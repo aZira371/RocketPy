@@ -2555,7 +2555,9 @@ class Environment:
         # Discretize this Function to speed up the trajectory simulation
         min_height = geopotential_height_to_geometric_height(-2000, earth_radius)
         max_height = geopotential_height_to_geometric_height(80000, earth_radius)
-        altitudes = np.linspace(min_height, max_height, 100)
+        altitudes_below = np.linspace(min_height, 0, 10, endpoint=False)
+        altitudes_above = np.linspace(0, max_height, 90)
+        altitudes = np.concatenate((altitudes_below, altitudes_above))
         pressures = [pressure_function(h) for h in altitudes]
 
         return np.column_stack([altitudes, pressures])
