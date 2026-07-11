@@ -1,6 +1,9 @@
+import inspect
+
 from rocketpy.mathutils import Function
 from rocketpy.plots.aero_surface_plots import _LinearGenericSurfacePlots
 from rocketpy.prints.aero_surface_prints import _LinearGenericSurfacePrints
+from rocketpy.rocket.aero_surface.aero_coefficient import AeroCoefficient
 from rocketpy.rocket.aero_surface.generic_surface import GenericSurface
 
 
@@ -22,6 +25,7 @@ class LinearGenericSurface(GenericSurface):
         name="Generic Linear Surface",
         interpolation=None,
         extrapolation=None,
+        force_convention=None,
     ):
         """Create a generic linear aerodynamic surface, defined by its
         aerodynamic coefficients derivatives. This surface is used to model any
@@ -34,6 +38,13 @@ class LinearGenericSurface(GenericSurface):
         pitch rate, yaw rate and roll rate. For CSV files, the header must
         contain at least one of the following: "alpha", "beta", "mach",
         "reynolds", "pitch_rate", "yaw_rate" and "roll_rate".
+
+        By default the force-coefficient derivatives are the body-frame ones
+        (``cN_*`` normal, ``cY_*`` side, ``cA_*`` axial; see
+        ``force_convention``). You may instead give the wind-frame derivatives
+        ``cL_*`` (lift), ``cQ_*`` (side) and ``cD_*`` (drag) -- for example
+        ``cL_alpha`` in place of ``cN_alpha``; they are converted once to the
+        body-frame set at construction.
 
         See Also
         --------
@@ -57,7 +68,10 @@ class LinearGenericSurface(GenericSurface):
             yaw moment ``cn`` or roll moment ``cl``; the variable is ``0`` (the
             value at zero angle of attack, zero sideslip and zero rates),
             ``alpha``, ``beta``, ``p`` (roll rate), ``q`` (pitch rate) or ``r``
-            (yaw rate). The full list is:\n
+            (yaw rate). With ``force_convention="wind"`` the force derivatives are
+            named after the wind-frame coefficients instead (lift ``cL``, side
+            ``cQ``, drag ``cD`` -- e.g. ``cL_alpha``, ``cD_0``, ``cQ_beta``); the
+            moment names are unchanged. The full (body-frame) list is:\n
             cN_0: callable, str, optional
                 Coefficient of normal force at zero angle of attack. Default is 0.\n
             cN_alpha: callable, str, optional
@@ -193,6 +207,21 @@ class LinearGenericSurface(GenericSurface):
             uses ``"constant"`` for tables built here and keeps whatever a
             pre-built ``Function`` already carries. Only affects tabulated
             sources (constants and callables are evaluated directly).
+        force_convention : str, optional
+            The frame your force-coefficient derivatives are given in. ``"body"``
+            for the body-frame derivatives ``cN_*`` (normal), ``cY_*`` (side) and
+            ``cA_*`` (axial); ``"wind"`` for the aerodynamic-frame derivatives
+            ``cL_*`` (lift), ``cQ_*`` (side) and ``cD_*`` (drag). The moment
+            derivatives (``cm_*``, ``cn_*``, ``cl_*``) are the same in both.
+            ``None`` (the default) infers the frame from the coefficient names you
+            pass and assumes body when none are given. A wind-frame input is
+            converted once to the body-frame derivatives the surface stores, by
+            linearizing the angle-of-attack/sideslip rotation about zero: the
+            straight renames ``cN_0 = cL_0``, ``cN_beta = cL_beta``, the rate
+            derivatives, and the cross terms ``cN_alpha = cL_alpha + cD_0``,
+            ``cY_beta = cQ_beta - cD_0``, ``cA_alpha = cD_alpha - cL_0`` and
+            ``cA_beta = cD_beta + cQ_0``. At zero angle this reduces to
+            ``cN = cL``, ``cY = cQ``, ``cA = cD``.
         """
 
         super().__init__(
@@ -203,6 +232,7 @@ class LinearGenericSurface(GenericSurface):
             name=name,
             extrapolation=extrapolation,
             interpolation=interpolation,
+            force_convention=force_convention,
         )
 
         self.compute_all_coefficients()
@@ -270,6 +300,126 @@ class LinearGenericSurface(GenericSurface):
             "cl_r": 0,
         }
         return default_coefficients
+
+    # Body force-coefficient prefix -> wind force-coefficient prefix, used to
+    # name the accepted wind-frame inputs. The per-plane suffixes (_0, _alpha,
+    # _beta, _p, _q, _r) and the moment coefficients (cm/cn/cl) are frame-shared.
+    _BODY_TO_WIND_PREFIX = {"cN": "cL", "cY": "cQ", "cA": "cD"}
+
+    def _force_frames_present(self, coefficients):
+        """Detect the force frame from the derivative-name prefixes: a wind key
+        looks like ``cL_alpha``/``cD_0``/``cQ_beta`` and a body key like
+        ``cN_alpha``/``cA_0``/``cY_beta``. The moment derivatives (``cm_*``,
+        ``cn_*``, ``cl_*``) are frame-shared and ignored here.
+        """
+        prefixes = {key.split("_", 1)[0] for key in coefficients}
+        has_wind = bool(prefixes & set(self._WIND_FORCE_NAMES))
+        has_body = bool(prefixes & set(self._BODY_FORCE_NAMES))
+        return has_wind, has_body
+
+    def _wind_default_coefficient_names(self):
+        """The valid wind-frame input names: the body defaults with the force
+        prefixes swapped to wind (``cN_* -> cL_*``, ``cY_* -> cQ_*``,
+        ``cA_* -> cD_*``); the moment names are unchanged.
+        """
+        names = set()
+        for key in self._get_default_coefficients():
+            prefix, sep, suffix = key.partition("_")
+            wind_prefix = self._BODY_TO_WIND_PREFIX.get(prefix, prefix)
+            names.add(f"{wind_prefix}{sep}{suffix}")
+        return names
+
+    def _wind_input_to_body(self, coefficients):
+        """Convert wind-frame coefficient derivatives (``cL_*``/``cD_*``/``cQ_*``)
+        into the canonical body-frame derivatives (``cN_*``/``cY_*``/``cA_*``).
+
+        The full body-frame force coefficients are the wind ones rotated by the
+        angle of attack and sideslip; linearizing that rotation about
+        ``alpha = beta = 0`` gives, to first order, a coefficient-derivative map
+        with four cross-frame terms::
+
+            cN_alpha = cL_alpha + cD_0      cA_alpha = cD_alpha - cL_0
+            cY_beta  = cQ_beta  - cD_0      cA_beta  = cD_beta  + cQ_0
+
+        Every other derivative is a straight rename (``cN_0 = cL_0``,
+        ``cN_beta = cL_beta``, the rate derivatives ``cN_p = cL_p`` ..., and the
+        wind side/axial analogues). At zero angle this reduces to ``cN = cL``,
+        ``cY = cQ``, ``cA = cD``, matching the generic surface. The moment
+        derivatives (``cm_*``/``cn_*``/``cl_*``) are frame-shared and pass
+        through unchanged.
+        """
+        invalid = set(coefficients) - self._wind_default_coefficient_names()
+        if invalid:
+            raise ValueError(
+                f"Invalid coefficient name(s) used in key(s): {', '.join(invalid)}. "
+                "Check the documentation for valid names."
+            )
+
+        def wind(name):
+            return coefficients.get(name, 0)
+
+        body = {
+            "cN_0": wind("cL_0"),
+            "cN_alpha": self._combine(wind("cL_alpha"), wind("cD_0"), 1.0, "cN_alpha"),
+            "cN_beta": wind("cL_beta"),
+            "cN_p": wind("cL_p"),
+            "cN_q": wind("cL_q"),
+            "cN_r": wind("cL_r"),
+            "cY_0": wind("cQ_0"),
+            "cY_alpha": wind("cQ_alpha"),
+            "cY_beta": self._combine(wind("cQ_beta"), wind("cD_0"), -1.0, "cY_beta"),
+            "cY_p": wind("cQ_p"),
+            "cY_q": wind("cQ_q"),
+            "cY_r": wind("cQ_r"),
+            "cA_0": wind("cD_0"),
+            "cA_alpha": self._combine(wind("cD_alpha"), wind("cL_0"), -1.0, "cA_alpha"),
+            "cA_beta": self._combine(wind("cD_beta"), wind("cQ_0"), 1.0, "cA_beta"),
+            "cA_p": wind("cD_p"),
+            "cA_q": wind("cD_q"),
+            "cA_r": wind("cD_r"),
+        }
+        # Moment derivatives are the same in both frames; pass them through.
+        for name, value in coefficients.items():
+            if name.split("_", 1)[0] not in self._WIND_FORCE_NAMES:
+                body[name] = value
+        return body
+
+    def _as_coefficient(self, source, name):
+        """Wrap a raw coefficient input as an :class:`AeroCoefficient` over this
+        surface's variables (used when recombining wind-frame derivatives).
+        """
+        return AeroCoefficient(
+            source,
+            unsteady_aero=self._unsteady_aero,
+            control_variables=self.control_variables,
+            name=name,
+        )
+
+    def _combine(self, first, second, sign, name):
+        """Return a coefficient equal to ``first + sign * second``.
+
+        When one term is identically zero the other is returned directly (as a
+        renamed coefficient), so a derivative that is really just a rename keeps
+        its original, low-dimensional form. Otherwise the two are summed by a
+        small wrapper evaluated over the full variable tuple.
+        """
+        coeff_first = self._as_coefficient(first, name)
+        coeff_second = self._as_coefficient(second, name)
+        if coeff_second.is_zero:
+            return coeff_first
+        if coeff_first.is_zero:
+            return coeff_second if sign > 0 else coeff_second * -1.0
+        first_opt = coeff_first.get_value_opt
+        second_opt = coeff_second.get_value_opt
+
+        def combined(*args):
+            return first_opt(*args) + sign * second_opt(*args)
+
+        combined.__signature__ = inspect.Signature(
+            inspect.Parameter(var, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            for var in self.independent_vars
+        )
+        return self._as_coefficient(combined, name)
 
     _COEFFICIENT_INPUTS = [
         "alpha",

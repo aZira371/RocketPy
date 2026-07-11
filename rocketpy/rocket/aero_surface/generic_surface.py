@@ -242,15 +242,13 @@ class GenericSurface:
         self.force_convention = self._resolve_force_convention(
             coefficients, force_convention
         )
-        # The wind->body conversion only applies to surfaces whose coefficients
-        # are the full body-frame forces (cN/cY/cA). The linear model uses
-        # coefficient derivatives (cN_alpha, ...) whose frame is fixed by name.
+        # Wind-frame force input (cL/cQ/cD) is converted once to the canonical
+        # body-frame coefficients before validation. Each surface supplies the
+        # conversion appropriate to its coefficients: the generic surface rotates
+        # the full force coefficients, while the linear model recombines the
+        # coefficient derivatives (see LinearGenericSurface._wind_input_to_body).
         # A non-dict input falls through to _check_coefficients, which rejects it.
-        if (
-            self.force_convention == "wind"
-            and "cN" in default_coefficients
-            and isinstance(coefficients, dict)
-        ):
+        if self.force_convention == "wind" and isinstance(coefficients, dict):
             coefficients = self._wind_input_to_body(coefficients)
         self._check_coefficients(coefficients, default_coefficients)
         coefficients = self._complete_coefficients(coefficients, default_coefficients)
@@ -505,23 +503,35 @@ class GenericSurface:
     _WIND_FORCE_NAMES = ("cL", "cQ", "cD")
     _BODY_FORCE_NAMES = ("cN", "cY", "cA")
 
+    def _force_frames_present(self, coefficients):
+        """Report which force frames the input coefficient names belong to, as
+        ``(has_wind, has_body)``.
+
+        A generic surface matches the plain force names (``cL``/``cQ``/``cD`` for
+        wind, ``cN``/``cY``/``cA`` for body). The linear model overrides this to
+        match those same names as derivative prefixes (``cL_alpha`` ...).
+        """
+        keys = set(coefficients)
+        has_wind = bool(keys & set(self._WIND_FORCE_NAMES))
+        has_body = bool(keys & set(self._BODY_FORCE_NAMES))
+        return has_wind, has_body
+
     def _resolve_force_convention(self, coefficients, force_convention):
         """Decide whether the input force coefficients are given in the wind
         frame (``cL``/``cQ``/``cD``) or the body frame (``cN``/``cY``/``cA``).
 
         When ``force_convention`` is ``None`` the frame is inferred from the
-        coefficient names; mixing the two frames is rejected.
+        coefficient names; mixing the two frames is rejected. With no force
+        coefficients to infer from, the canonical body frame is assumed.
         """
-        keys = set(coefficients)
-        has_wind = bool(keys & set(self._WIND_FORCE_NAMES))
-        has_body = bool(keys & set(self._BODY_FORCE_NAMES))
+        has_wind, has_body = self._force_frames_present(coefficients)
         if force_convention is None:
             if has_wind and has_body:
                 raise ValueError(
                     "Mixed wind (cL/cQ/cD) and body (cN/cY/cA) force "
                     "coefficients; pass force_convention='wind' or 'body'."
                 )
-            return "body" if has_body else "wind"
+            return "wind" if has_wind else "body"
         if force_convention not in ("wind", "body"):
             raise ValueError(
                 f"force_convention must be 'wind' or 'body', got {force_convention!r}."
