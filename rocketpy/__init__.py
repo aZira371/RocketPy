@@ -1,4 +1,11 @@
 from ._logging import enable_logging, logger, set_log_level
+from .body import (
+    BodyLike,
+    BodyResolver,
+    FlightBody,
+    FlightCompatibleRocket,
+    RocketAdapter,
+)
 from .control import _Controller
 from .environment import Environment, EnvironmentAnalysis
 from .mathutils import (
@@ -6,6 +13,26 @@ from .mathutils import (
     PiecewiseFunction,
     funcify_method,
     reset_funcified_methods,
+)
+from .mission import (
+    Attachment,
+    BranchResult,
+    Deployable,
+    DeploymentEvent,
+    FlightConfig,
+    IgnitionEvent,
+    InstantaneousSeparation,
+    Mission,
+    MissionExecutionResult,
+    MissionExecutor,
+    MissionResult,
+    NoOpParentUpdate,
+    ParentUpdate,
+    RecoveryEvent,
+    SeparationModel,
+    Stage,
+    StageSeparationEvent,
+    StageState,
 )
 from .motors import (
     CylindricalTank,
@@ -52,6 +79,7 @@ from .sensors import Accelerometer, Barometer, GnssReceiver, Gyroscope
 from .simulation import (
     Event,
     Flight,
+    FlightBranch,
     MonteCarlo,
     MultivariateRejectionSampler,
 )
