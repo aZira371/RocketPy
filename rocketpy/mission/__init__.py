@@ -6,7 +6,6 @@ from rocketpy.mission.branch_result import BranchResult
 from rocketpy.mission.deployable import Deployable
 from rocketpy.mission.events import (
     DeploymentEvent,
-    Event,
     IgnitionEvent,
     RecoveryEvent,
     StageSeparationEvent,
@@ -26,7 +25,6 @@ __all__ = [
     "BranchResult",
     "Deployable",
     "DeploymentEvent",
-    "Event",
     "FlightConfig",
     "IgnitionEvent",
     "InstantaneousSeparation",

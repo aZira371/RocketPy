@@ -1,74 +1,21 @@
-"""Event hierarchy for the mission architecture."""
+"""Mission-lifecycle events, built directly on rocketpy.simulation.events.Event.
 
-from abc import ABC, abstractmethod
+The mission architecture does not define its own event base class: each
+event below is a thin :class:`~rocketpy.simulation.events.Event` subclass
+that fixes the *callback* to a specific mission-lifecycle action (deployment,
+stage separation, ignition, recovery), while the *trigger* is supplied by the
+caller using the same ``trigger(**kwargs) -> bool`` convention as any other
+:class:`~rocketpy.simulation.events.Event` (``kwargs`` includes ``time``,
+``state``, ``flight``, ``rocket``, ...; see :class:`~rocketpy.simulation.events.Event`
+for the full list).
 
+Each event fires at most once (``trigger_only_once=True``): deployment,
+separation, and ignition are one-shot lifecycle transitions, not continuous
+conditions, so a trigger that stays true after firing (e.g. ``vz <= 0``
+during descent) must not repeatedly re-invoke the callback.
+"""
 
-class Event(ABC):
-    """Abstract base class for all mission events.
-
-    An event monitors simulation state and, when its trigger condition is
-    met, applies a transformation to a :class:`FlightBranch`.
-
-    Parameters
-    ----------
-    name : str
-        Human-readable name for the event (e.g. ``"main_chute"``).
-    priority : int, optional
-        Ordering priority when multiple events fire at the same instant.
-        Lower values are processed first.  Defaults to ``0``.
-
-    Attributes
-    ----------
-    name : str
-    priority : int
-    """
-
-    def __init__(self, name: str, priority: int = 0):
-        self.name = name
-        self.priority = priority
-
-    @abstractmethod
-    def should_fire(self, state, context) -> bool:
-        """Determine whether this event should fire given the current state.
-
-        Parameters
-        ----------
-        state : object
-            Current simulation state vector.
-        context : object
-            Simulation context object providing environment, time, etc.
-
-        Returns
-        -------
-        bool
-            ``True`` if the event should be triggered.
-        """
-
-    @abstractmethod
-    def apply(self, branch, context):
-        """Apply the event's effect to a flight branch.
-
-        Concrete implementations should mutate *branch* (e.g. spawn child
-        branches, update the body, activate recovery systems).  The default
-        stub in each concrete subclass is intentionally a no-op; the actual
-        orchestration is performed by the simulation engine which calls
-        :meth:`should_fire` and then :meth:`apply` at each time step.
-
-        Parameters
-        ----------
-        branch : :class:`~rocketpy.simulation.FlightBranch`
-            The branch that is currently being integrated.
-        context : object
-            Simulation context.
-        """
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}(name={self.name!r}, priority={self.priority})"
-
-
-# ---------------------------------------------------------------------------
-# Concrete event types
-# ---------------------------------------------------------------------------
+from rocketpy.simulation.events.event import Event
 
 
 class DeploymentEvent(Event):
@@ -79,40 +26,38 @@ class DeploymentEvent(Event):
     name : str
         Human-readable name.
     trigger : callable
-        ``trigger(state, context) -> bool`` – returns ``True`` when the
-        deployable should be released.
+        ``trigger(**kwargs) -> bool`` – returns ``True`` when the deployable
+        should be released.
     priority : int, optional
-        Processing priority.  Defaults to ``0``.
+        Event evaluation priority (see
+        :class:`~rocketpy.simulation.events.Event`). Defaults to ``4``
+        (custom/user-defined), since deployment is a mission-level, not a
+        core-flight, event.
     """
 
-    def __init__(self, name: str, trigger, priority: int = 0):
-        super().__init__(name, priority)
-        self._trigger = trigger
+    def __init__(self, name, trigger, priority=4):
+        super().__init__(
+            callback=self._deploy,
+            trigger=trigger,
+            name=name,
+            priority=priority,
+            trigger_only_once=True,
+        )
 
-    def should_fire(self, state, context) -> bool:
-        return bool(self._trigger(state, context))
-
-    def apply(self, branch, context):
-        """Deploy the associated :class:`Deployable` from *branch*.
-
-        Parameters
-        ----------
-        branch : FlightBranch
-            Active branch.
-        context : object
-            Simulation context.
+    def _deploy(self, **kwargs):
+        """Deploy the associated :class:`Deployable`.
 
         Notes
         -----
         The actual separation logic is delegated to the Deployable's
         :class:`~rocketpy.mission.SeparationModel` and
-        :class:`~rocketpy.mission.ParentUpdate`.  Orchestration is performed
-        by the simulation engine.
+        :class:`~rocketpy.mission.ParentUpdate`.
 
         .. todo::
             Wire up ``Deployable.separation.apply()`` and
-            ``Deployable.parent_update.apply()`` here once the simulation
-            engine integration layer is implemented.
+            ``Deployable.parent_update.apply()`` via this callback's
+            ``event.commands`` once the mission executor drives branch
+            spawning (see :class:`~rocketpy.simulation.FlightBranch`).
         """
 
 
@@ -124,35 +69,28 @@ class StageSeparationEvent(Event):
     name : str
         Human-readable name.
     trigger : callable
-        ``trigger(state, context) -> bool``.
+        ``trigger(**kwargs) -> bool``.
     priority : int, optional
-        Processing priority.  Defaults to ``0``.
+        Event evaluation priority. Defaults to ``4``.
     """
 
-    def __init__(self, name: str, trigger, priority: int = 0):
-        super().__init__(name, priority)
-        self._trigger = trigger
+    def __init__(self, name, trigger, priority=4):
+        super().__init__(
+            callback=self._separate,
+            trigger=trigger,
+            name=name,
+            priority=priority,
+            trigger_only_once=True,
+        )
 
-    def should_fire(self, state, context) -> bool:
-        return bool(self._trigger(state, context))
-
-    def apply(self, branch, context):
+    def _separate(self, **kwargs):
         """Separate the stage from its parent branch.
 
-        Parameters
-        ----------
-        branch : FlightBranch
-            Active branch.
-        context : object
-            Simulation context.
-
-        Notes
-        -----
         .. todo::
-            Implement stage separation: invoke
-            ``Stage.separation.apply()`` and ``Stage.parent_update.apply()``,
-            and spawn a new child :class:`~rocketpy.simulation.FlightBranch`
-            for the separated stage.
+            Invoke ``Stage.separation.apply()`` and
+            ``Stage.parent_update.apply()``, and spawn a new child
+            :class:`~rocketpy.simulation.FlightBranch` for the separated
+            stage, via this callback's ``event.commands``.
         """
 
 
@@ -164,34 +102,26 @@ class IgnitionEvent(Event):
     name : str
         Human-readable name.
     trigger : callable
-        ``trigger(state, context) -> bool``.
+        ``trigger(**kwargs) -> bool``.
     priority : int, optional
-        Processing priority.  Defaults to ``0``.
+        Event evaluation priority. Defaults to ``4``.
     """
 
-    def __init__(self, name: str, trigger, priority: int = 0):
-        super().__init__(name, priority)
-        self._trigger = trigger
+    def __init__(self, name, trigger, priority=4):
+        super().__init__(
+            callback=self._ignite,
+            trigger=trigger,
+            name=name,
+            priority=priority,
+            trigger_only_once=True,
+        )
 
-    def should_fire(self, state, context) -> bool:
-        return bool(self._trigger(state, context))
-
-    def apply(self, branch, context):
+    def _ignite(self, **kwargs):
         """Ignite the stage motor.
 
-        Parameters
-        ----------
-        branch : FlightBranch
-            Active branch.
-        context : object
-            Simulation context.
-
-        Notes
-        -----
         .. todo::
-            Implement motor ignition: activate the propulsion model on
-            the stage body and transition :attr:`Stage.state` to
-            :attr:`~rocketpy.mission.StageState.IGNITED`.
+            Activate the propulsion model on the stage body and transition
+            :attr:`Stage.state` to :attr:`~rocketpy.mission.StageState.IGNITED`.
         """
 
 
@@ -203,31 +133,24 @@ class RecoveryEvent(Event):
     name : str
         Human-readable name.
     trigger : callable
-        ``trigger(state, context) -> bool``.
+        ``trigger(**kwargs) -> bool``.
     priority : int, optional
-        Processing priority.  Defaults to ``0``.
+        Event evaluation priority. Defaults to ``4``.
     """
 
-    def __init__(self, name: str, trigger, priority: int = 0):
-        super().__init__(name, priority)
-        self._trigger = trigger
+    def __init__(self, name, trigger, priority=4):
+        super().__init__(
+            callback=self._recover,
+            trigger=trigger,
+            name=name,
+            priority=priority,
+            trigger_only_once=True,
+        )
 
-    def should_fire(self, state, context) -> bool:
-        return bool(self._trigger(state, context))
-
-    def apply(self, branch, context):
+    def _recover(self, **kwargs):
         """Activate the recovery system.
 
-        Parameters
-        ----------
-        branch : FlightBranch
-            Active branch.
-        context : object
-            Simulation context.
-
-        Notes
-        -----
         .. todo::
-            Implement recovery system activation: deploy the parachute or
-            other recovery device attached to the branch body.
+            Deploy the parachute or other recovery device attached to the
+            branch body.
         """

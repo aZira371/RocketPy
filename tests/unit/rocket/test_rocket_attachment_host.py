@@ -46,7 +46,7 @@ def _make_attachment():
     return Attachment([0.0, 0.0, 1.5], [0.0, 0.0, 0.0])
 
 
-def _always(state, ctx):
+def _always(**kwargs):
     return True
 
 

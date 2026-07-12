@@ -11,7 +11,6 @@ from rocketpy.mission import (
     Attachment,
     Deployable,
     DeploymentEvent,
-    Event,
     FlightConfig,
     IgnitionEvent,
     InstantaneousSeparation,
@@ -25,6 +24,7 @@ from rocketpy.mission import (
     StageSeparationEvent,
     StageState,
 )
+from rocketpy.simulation import Event
 
 
 # ---------------------------------------------------------------------------
@@ -53,11 +53,11 @@ def _make_attachment():
     )
 
 
-def _always_trigger(state, context):
+def _always_trigger(**kwargs):
     return True
 
 
-def _never_trigger(state, context):
+def _never_trigger(**kwargs):
     return False
 
 
@@ -180,40 +180,50 @@ class TestAttachment:
 
 
 class TestEventHierarchy:
-    """Event ABC and concrete subtypes."""
+    """Mission events build directly on rocketpy.simulation.events.Event."""
 
-    def test_event_is_abstract(self):
-        """Event cannot be instantiated directly."""
-        with pytest.raises(TypeError):
-            Event("abstract")  # type: ignore[abstract]
+    @pytest.mark.parametrize(
+        "event_class",
+        [DeploymentEvent, StageSeparationEvent, IgnitionEvent, RecoveryEvent],
+    )
+    def test_is_a_simulation_event(self, event_class):
+        """Each mission event subclasses rocketpy.simulation.events.Event."""
+        ev = event_class("ev", _always_trigger)
+        assert isinstance(ev, Event)
 
     def test_deployment_event_fires_on_true_trigger(self):
-        """DeploymentEvent.should_fire returns True when trigger is True."""
+        """DeploymentEvent fires (trigger + callback) when its trigger is True."""
         ev = DeploymentEvent("deploy", _always_trigger)
-        assert ev.should_fire(None, None) is True
+        assert ev() is True
 
     def test_deployment_event_does_not_fire_on_false_trigger(self):
-        """DeploymentEvent.should_fire returns False when trigger is False."""
+        """DeploymentEvent does not fire when its trigger is False."""
         ev = DeploymentEvent("deploy", _never_trigger)
-        assert ev.should_fire(None, None) is False
+        assert ev() is False
 
     def test_stage_separation_event_fires(self):
         """StageSeparationEvent respects its trigger."""
         ev = StageSeparationEvent("sep", _always_trigger)
-        assert ev.should_fire(None, None) is True
+        assert ev() is True
 
     def test_ignition_event_fires(self):
         """IgnitionEvent respects its trigger."""
         ev = IgnitionEvent("ignite", _always_trigger)
-        assert ev.should_fire(None, None) is True
+        assert ev() is True
 
     def test_recovery_event_fires(self):
         """RecoveryEvent respects its trigger."""
         ev = RecoveryEvent("recover", _always_trigger)
-        assert ev.should_fire(None, None) is True
+        assert ev() is True
+
+    def test_event_priority_defaults_to_custom(self):
+        """priority defaults to 4 (custom/user-defined events), not 0 (core
+        Flight events like out-of-rail/apogee/impact)."""
+        ev = DeploymentEvent("deploy", _always_trigger)
+        assert ev.priority == 4
 
     def test_event_priority_stored(self):
-        """priority attribute is stored correctly."""
+        """priority attribute is stored correctly when overridden."""
         ev = DeploymentEvent("hi_prio", _always_trigger, priority=5)
         assert ev.priority == 5
 
@@ -221,10 +231,26 @@ class TestEventHierarchy:
         "event_class",
         [DeploymentEvent, StageSeparationEvent, IgnitionEvent, RecoveryEvent],
     )
-    def test_apply_does_not_raise(self, event_class):
-        """apply() can be called without raising on concrete event types."""
+    def test_callback_does_not_raise(self, event_class):
+        """Triggering the event (trigger + callback) does not raise."""
         ev = event_class("ev", _always_trigger)
-        ev.apply(None, None)  # must not raise
+        ev()  # must not raise
+
+    @pytest.mark.parametrize(
+        "event_class",
+        [DeploymentEvent, StageSeparationEvent, IgnitionEvent, RecoveryEvent],
+    )
+    def test_configured_as_one_shot(self, event_class):
+        """Mission lifecycle events are one-shot: deployment, separation, and
+        ignition should not keep re-firing on every step of a trigger
+        condition that stays true (e.g. vz <= 0 throughout a descent).
+        Flight applies this by disabling the event once commands are
+        processed; here we confirm the event is configured for that and
+        queues the disable command once it fires."""
+        ev = event_class("ev", _always_trigger)
+        assert ev.trigger_only_once is True
+        assert ev() is True
+        assert ev.commands._disabled is True
 
 
 # ---------------------------------------------------------------------------
@@ -683,6 +709,27 @@ class TestMissionExecutor:
         assert results[1].flight.kwargs["heading"] == 45
         assert results[1].flight.kwargs["initial_solution"] is results[0].flight
         assert stage.state == StageState.SPENT
+
+    def test_execute_forwards_item_events_as_custom_events(self):
+        """execute() forwards an item's mission events as Flight's custom_events."""
+        sep_event = StageSeparationEvent("sep", _always_trigger)
+        mission = Mission()
+        stage = _make_stage(
+            name="stage_1",
+            body=_make_rocket_adapter("stage_rocket"),
+            separation_event=sep_event,
+        )
+        mission.add_stage(stage)
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            flight_class=self.FakeFlight,
+        )
+
+        results = executor.execute()
+
+        assert results[0].flight.kwargs["custom_events"] == [sep_event]
 
     def test_execute_raises_for_non_rocket_body(self):
         """execute raises TypeError when body is not RocketAdapter-backed."""

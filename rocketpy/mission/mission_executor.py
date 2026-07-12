@@ -153,14 +153,23 @@ class MissionExecutor:
             "default", self.default_flight_inputs
         )
 
-    def _build_flight(self, body, config: FlightConfig):
-        """Resolve *body* and construct a :class:`~rocketpy.simulation.Flight`."""
+    def _build_flight(self, body, config: FlightConfig, events=None):
+        """Resolve *body* and construct a :class:`~rocketpy.simulation.Flight`.
+
+        *events* (the item's mission-lifecycle
+        :class:`~rocketpy.simulation.events.Event` instances, if any) are
+        forwarded as Flight's ``custom_events``, unless the config already
+        provides an explicit ``custom_events`` override.
+        """
         rocket = BodyResolver.to_flight_rocket(BodyResolver.to_body(body))
+        kwargs = config.to_flight_kwargs()
+        if events:
+            kwargs.setdefault("custom_events", list(events))
         return self.flight_class(
             rocket=rocket,
             environment=self.environment,
             rail_length=config.rail_length,
-            **config.to_flight_kwargs(),
+            **kwargs,
         )
 
     def _build_branch(
@@ -173,7 +182,7 @@ class MissionExecutor:
         if config.initial_solution is None and previous_flight is not None:
             config.initial_solution = previous_flight
 
-        flight = self._build_flight(item.body, config)
+        flight = self._build_flight(item.body, config, events=item.events)
 
         if isinstance(item, Stage):
             # Mission-level bookkeeping only: the sequential model does not

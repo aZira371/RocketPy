@@ -116,6 +116,8 @@ class Environment:
         Air pressure in Pa as a function of altitude.
     Environment.barometric_height : Function
         Geometric height above sea level in m as a function of pressure.
+    Environment.height_above_ground_level : Function
+        Geometric height above ground level in m as a function of pressure.
     Environment.temperature : Function
         Air temperature in K as a function of altitude.
     Environment.speed_of_sound : Function
@@ -504,6 +506,7 @@ class Environment:
                 extrapolation="constant",
                 mutate_self=True,
             )
+        self.__reset_height_above_ground_level_function()
 
     def __set_temperature_function(self, source):
         self.temperature = Function(
@@ -567,6 +570,14 @@ class Environment:
             )
         self.barometric_height.set_inputs("Pressure (Pa)")
         self.barometric_height.set_outputs("Height Above Sea Level (m)")
+        self.__reset_height_above_ground_level_function()
+
+    def __reset_height_above_ground_level_function(self):
+        """Set height above ground level function from pressure input."""
+        self.height_above_ground_level = self.barometric_height - self.elevation
+        self.height_above_ground_level.set_inputs("Pressure (Pa)")
+        self.height_above_ground_level.set_outputs("Height Above Ground Level (m)")
+        self.height_above_ground_level.set_title("Height Above Ground Level Profile")
 
     def __reset_wind_speed_function(self):
         # NOTE: assume wind_velocity_x and wind_velocity_y as Function objects
@@ -979,6 +990,9 @@ class Environment:
             self.elevation = fetch_open_elevation(self.latitude, self.longitude)
             print(f"Elevation received: {self.elevation} m")
 
+        if hasattr(self, "barometric_height"):
+            self.__reset_height_above_ground_level_function()
+
     def set_topographic_profile(  # pylint: disable=redefined-builtin, unused-argument
         self, type, file, dictionary="netCDF4", crs=None
     ):
@@ -1120,6 +1134,7 @@ class Environment:
         temperature=None,
         wind_u=0,
         wind_v=0,
+        pressure_conversion_factor="Pa",
     ):
         """Define the atmospheric model for this Environment.
 
@@ -1216,6 +1231,12 @@ class Environment:
             m/s). Finally, a callable or function is also accepted. The function
             should take one argument, the height above sea level in meters and
             return a corresponding wind-v in m/s.
+        pressure_conversion_factor : string, int, float
+            This defines the pressure conversion factor to Pa when type is
+            ``forecast`` or ``reanalysis``. The pressure unit from the data may
+            not be in Pascal, so the correction is necessary. Valid strings are
+            ("mbar", "hPa", "Pa"), or a strictly positive number if using a
+            custom pressure unit.
 
         Returns
         -------
@@ -1251,6 +1272,9 @@ class Environment:
         :ref:`environment_other_apis`
             Building custom mapping dictionaries for NetCDF/OPeNDAP APIs.
         """
+        # TODO: run environment with set atmospheric model Windy GFS, BUT
+        # Without set date. Some error occurs. We should catch lack of date
+
         # Save atmospheric model type
         self.atmospheric_model_type = type
         type = type.lower()
@@ -1265,6 +1289,28 @@ class Environment:
             case "windy":
                 self.process_windy_atmosphere(file)
             case "forecast" | "reanalysis" | "ensemble":
+                conversion_factor = 1
+                if not isinstance(pressure_conversion_factor, (float, int, str)):
+                    raise ValueError(
+                        "Argument 'pressure_conversion_factor' must be numeric or a standard pressure unit ('mbar', 'hPa', 'Pa')!"
+                    )
+                if isinstance(pressure_conversion_factor, (float, int)):
+                    if pressure_conversion_factor <= 0:
+                        raise ValueError(
+                            "Argument 'pressure_conversion_factor' must be strictly positive!"
+                        )
+                    else:
+                        conversion_factor = pressure_conversion_factor
+                if isinstance(pressure_conversion_factor, str):
+                    if pressure_conversion_factor.lower() in ("mbar", "hpa"):
+                        conversion_factor = 100
+                    elif pressure_conversion_factor.lower() == "pa":
+                        conversion_factor = 1
+                    else:
+                        raise ValueError(
+                            "Argument 'pressure_conversion_factor' unit must be a standard pressure unit ('mbar', 'hPa', 'Pa')!"
+                        )
+
                 if isinstance(file, str):
                     shortcut_map = self.__atm_type_file_to_function_map.get(type, {})
                     matching_shortcut = next(
@@ -1305,9 +1351,11 @@ class Environment:
                 dataset = fetch_function() if fetch_function is not None else file
 
                 if type in ["forecast", "reanalysis"]:
-                    self.process_forecast_reanalysis(dataset, dictionary)
+                    self.process_forecast_reanalysis(
+                        dataset, dictionary, conversion_factor=conversion_factor
+                    )
                 else:
-                    self.process_ensemble(dataset, dictionary)
+                    self.process_ensemble(dataset, dictionary, conversion_factor)
             case _:  # pragma: no cover
                 raise ValueError(f"Unknown model type '{type}'.")
 
@@ -1336,6 +1384,7 @@ class Environment:
         # Save temperature, pressure and wind profiles
         self.pressure = self.pressure_ISA
         self.barometric_height = self.barometric_height_ISA
+        self.__reset_height_above_ground_level_function()
         self.temperature = self.temperature_ISA
 
         # Set wind profiles to zero
@@ -1430,6 +1479,7 @@ class Environment:
             # Use standard atmosphere
             self.pressure = self.pressure_ISA
             self.barometric_height = self.barometric_height_ISA
+            self.__reset_height_above_ground_level_function()
         else:
             # Use custom input
             self.__set_pressure_function(pressure)
@@ -1686,7 +1736,7 @@ class Environment:
         # Save maximum expected height
         self._max_expected_height = data_array[-1, 1]
 
-    def process_forecast_reanalysis(self, file, dictionary):  # pylint: disable=too-many-locals,too-many-statements
+    def process_forecast_reanalysis(self, file, dictionary, conversion_factor):  # pylint: disable=too-many-locals,too-many-statements
         """Import and process atmospheric data from weather forecasts
         and reanalysis given as ``netCDF`` or ``OPeNDAP`` files.
         Sets pressure, temperature, wind-u and wind-v
@@ -1738,6 +1788,9 @@ class Environment:
                     "u_wind": "ugrdprs",
                     "v_wind": "vgrdprs",
                 }
+        conversion_factor : float, int
+            Specifies the factor by which the pressure will be multiplied
+            in order to transform it to Pascal.
 
         Returns
         -------
@@ -1790,7 +1843,7 @@ class Environment:
         _, lat_index = find_latitude_index(target_lat, lat_array)
 
         # Get pressure level data from file
-        levels = get_pressure_levels_from_file(data, dictionary)
+        levels = get_pressure_levels_from_file(data, dictionary, conversion_factor)
 
         # Get geopotential data from file
         try:
@@ -1991,7 +2044,7 @@ class Environment:
         # Close weather data
         data.close()
 
-    def process_ensemble(self, file, dictionary):  # pylint: disable=too-many-locals,too-many-statements
+    def process_ensemble(self, file, dictionary, conversion_factor):  # pylint: disable=too-many-locals,too-many-statements
         """Import and process atmospheric data from weather ensembles
         given as ``netCDF`` or ``OPeNDAP`` files. Sets pressure, temperature,
         wind-u and wind-v profiles and surface elevation obtained from a weather
@@ -2042,6 +2095,9 @@ class Environment:
                     "u_wind": "ugrdprs",
                     "v_wind": "vgrdprs",
                 }
+        conversion_factor : float, int
+            Specifies the factor by which the pressure will be multiplied
+            in order to transform it to Pascal.
 
         See also
         --------
@@ -2106,7 +2162,7 @@ class Environment:
             num_members = 1
 
         # Get pressure level data from file
-        levels = get_pressure_levels_from_file(data, dictionary)
+        levels = get_pressure_levels_from_file(data, dictionary, conversion_factor)
 
         inverse_dictionary = {v: k for k, v in dictionary.items()}
         param_dictionary = {

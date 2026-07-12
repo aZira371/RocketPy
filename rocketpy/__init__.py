@@ -1,3 +1,4 @@
+from ._logging import enable_logging, logger, set_log_level
 from .body import (
     BodyLike,
     BodyResolver,
@@ -18,7 +19,6 @@ from .mission import (
     BranchResult,
     Deployable,
     DeploymentEvent,
-    Event,
     FlightConfig,
     IgnitionEvent,
     InstantaneousSeparation,
@@ -76,7 +76,13 @@ from .rocket import (
 )
 from .sensitivity import SensitivityModel
 from .sensors import Accelerometer, Barometer, GnssReceiver, Gyroscope
-from .simulation import Flight, FlightBranch, MonteCarlo, MultivariateRejectionSampler
+from .simulation import (
+    Event,
+    Flight,
+    FlightBranch,
+    MonteCarlo,
+    MultivariateRejectionSampler,
+)
 from .stochastic import (
     CustomSampler,
     StochasticAirBrakes,
