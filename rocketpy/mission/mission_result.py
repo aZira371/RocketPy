@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from rocketpy.mission.branch_result import BranchResult
+from rocketpy.plots import CompareFlights
 
 
 @dataclass
@@ -124,8 +125,6 @@ class MissionResult:
         CompareFlights
             The comparison object used to render the plot.
         """
-        from rocketpy.plots import CompareFlights  # local: avoid import-time dep
-
         comparison = CompareFlights(self.all_flights())
         comparison.trajectories_3d(legend=True)
         return comparison

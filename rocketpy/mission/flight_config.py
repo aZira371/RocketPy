@@ -91,7 +91,9 @@ class FlightConfig:
         kwargs.update(self.extra_kwargs)
         return kwargs
 
-    def for_branch(self, name: str, overrides: dict = None) -> "FlightConfig":
+    def for_branch(  # pylint: disable=unused-argument
+        self, name: str, overrides: dict = None
+    ) -> "FlightConfig":
         """Return a new :class:`FlightConfig` with *overrides* applied on top.
 
         Parameters

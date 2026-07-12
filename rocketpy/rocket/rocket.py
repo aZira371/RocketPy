@@ -6,8 +6,11 @@ from typing import Iterable
 
 import numpy as np
 
+from rocketpy.body.rocket_adapter import RocketAdapter
 from rocketpy.control.controller import _Controller
 from rocketpy.mathutils.function import Function
+from rocketpy.mission.deployable import Deployable
+from rocketpy.mission.stage import Stage
 from rocketpy.mathutils.vector_matrix import Matrix, Vector
 from rocketpy.motors.empty_motor import EmptyMotor
 from rocketpy.plots.rocket_plots import _RocketPlots
@@ -2201,8 +2204,6 @@ class Rocket:
         ValueError
             If *stage* fails validation.
         """
-        from rocketpy.mission.stage import Stage  # local import avoids circularity
-
         if not isinstance(stage, Stage):
             raise TypeError(f"Expected a Stage instance, got {type(stage).__name__!r}.")
         stage.validate()
@@ -2224,8 +2225,6 @@ class Rocket:
         ValueError
             If *deployable* fails validation.
         """
-        from rocketpy.mission.deployable import Deployable  # local import
-
         if not isinstance(deployable, Deployable):
             raise TypeError(
                 f"Expected a Deployable instance, got {type(deployable).__name__!r}."
@@ -2288,8 +2287,6 @@ class Rocket:
         :class:`~rocketpy.body.RocketAdapter`
             Adapter wrapping ``self``.
         """
-        from rocketpy.body.rocket_adapter import RocketAdapter  # local import
-
         return RocketAdapter(self)
 
     @property

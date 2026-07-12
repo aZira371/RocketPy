@@ -50,15 +50,17 @@ class TestBodyLikeProtocol:
 
         # Arrange
         class StructuralBody:
+            """Minimal duck-typed BodyLike, without inheriting from it."""
+
             name = "structural"
 
-            def mass(self, t):
+            def mass(self, _t):
                 return 1.0
 
-            def inertia_tensor(self, t):
+            def inertia_tensor(self, _t):
                 return (1.0, 1.0, 1.0, 0.0, 0.0, 0.0)
 
-            def center_of_mass(self, t):
+            def center_of_mass(self, _t):
                 return 0.0
 
             def aerodynamic_model(self):
@@ -222,28 +224,28 @@ class _FakeRocket:
     parachutes = ["parachute_a"]
     _controllers = []
 
-    def total_mass(self, t):
+    def total_mass(self, _t):
         return 20.0
 
-    def I_11(self, t):
+    def I_11(self, _t):
         return 1.0
 
-    def I_22(self, t):
+    def I_22(self, _t):
         return 1.0
 
-    def I_33(self, t):
+    def I_33(self, _t):
         return 0.05
 
-    def I_12(self, t):
+    def I_12(self, _t):
         return 0.0
 
-    def I_13(self, t):
+    def I_13(self, _t):
         return 0.0
 
-    def I_23(self, t):
+    def I_23(self, _t):
         return 0.0
 
-    def center_of_mass(self, t):
+    def center_of_mass(self, _t):
         return 0.8
 
     @property

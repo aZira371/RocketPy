@@ -8,7 +8,6 @@ from rocketpy.mission import (
     Attachment,
     Deployable,
     DeploymentEvent,
-    IgnitionEvent,
     Stage,
     StageSeparationEvent,
 )
@@ -44,28 +43,28 @@ def _make_attachment():
     return Attachment([0.0, 0.0, 1.5], [0.0, 0.0, 0.0])
 
 
-def _always(**kwargs):
+def _always(**_kwargs):
     return True
 
 
 def _make_stage(**kwargs):
-    defaults = dict(
-        name="upper_stage",
-        body=_make_body("upper_body"),
-        attachment=_make_attachment(),
-        separation_event=StageSeparationEvent("sep", _always),
-    )
+    defaults = {
+        "name": "upper_stage",
+        "body": _make_body("upper_body"),
+        "attachment": _make_attachment(),
+        "separation_event": StageSeparationEvent("sep", _always),
+    }
     defaults.update(kwargs)
     return Stage(**defaults)
 
 
 def _make_deployable(**kwargs):
-    defaults = dict(
-        name="payload",
-        body=_make_body("payload"),
-        attachment=_make_attachment(),
-        deployment_event=DeploymentEvent("deploy", _always),
-    )
+    defaults = {
+        "name": "payload",
+        "body": _make_body("payload"),
+        "attachment": _make_attachment(),
+        "deployment_event": DeploymentEvent("deploy", _always),
+    }
     defaults.update(kwargs)
     return Deployable(**defaults)
 

@@ -33,7 +33,6 @@ class BodyLike(Protocol):
         str
             Body name.
         """
-        ...
 
     def mass(self, t: float) -> float:
         """Total mass of the body at time *t*, in kg.
@@ -48,7 +47,6 @@ class BodyLike(Protocol):
         float
             Total mass in kg.
         """
-        ...
 
     def inertia_tensor(self, t: float):
         """Inertia tensor of the body at time *t*, in kg·m².
@@ -63,7 +61,6 @@ class BodyLike(Protocol):
         array-like
             3×3 inertia tensor in kg·m².
         """
-        ...
 
     def center_of_mass(self, t: float) -> float:
         """Position of the center of mass along the body axis at time *t*.
@@ -81,7 +78,6 @@ class BodyLike(Protocol):
         float
             Center-of-mass position in meters.
         """
-        ...
 
     def aerodynamic_model(self):
         """Return the aerodynamic model attached to this body.
@@ -91,7 +87,6 @@ class BodyLike(Protocol):
         object
             Aerodynamic model instance.
         """
-        ...
 
     def propulsion_model(self):
         """Return the propulsion model attached to this body.
@@ -101,7 +96,6 @@ class BodyLike(Protocol):
         object
             Propulsion model instance.
         """
-        ...
 
     def recovery_systems(self):
         """Return the list of recovery systems attached to this body.
@@ -111,7 +105,6 @@ class BodyLike(Protocol):
         list
             Recovery systems.
         """
-        ...
 
     def sensors(self):
         """Return the list of sensors attached to this body.
@@ -121,7 +114,6 @@ class BodyLike(Protocol):
         list
             Sensor instances.
         """
-        ...
 
     def controllers(self):
         """Return the list of active controllers attached to this body.
@@ -131,7 +123,6 @@ class BodyLike(Protocol):
         list
             Controller instances.
         """
-        ...
 
     def coordinate_system_orientation(self) -> str:
         """Orientation convention for the body's coordinate system.
@@ -141,7 +132,6 @@ class BodyLike(Protocol):
         str
             One of ``"tail_to_nose"`` or ``"nose_to_tail"``.
         """
-        ...
 
     def to_branch_ready_copy(self):
         """Return a simulation-ready deep copy of this body.
@@ -154,4 +144,3 @@ class BodyLike(Protocol):
         BodyLike
             A deep copy suitable for a :class:`FlightBranch`.
         """
-        ...

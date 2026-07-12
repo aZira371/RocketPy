@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from rocketpy.body import BodyResolver, FlightCompatibleRocket
+from rocketpy.body import BodyResolver
 from rocketpy.mission.branch_result import BranchResult
 from rocketpy.mission.flight_config import FlightConfig
 from rocketpy.mission.mission_result import MissionResult

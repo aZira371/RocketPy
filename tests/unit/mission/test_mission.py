@@ -33,13 +33,13 @@ from rocketpy.simulation import Event
 
 def _make_body(name="body", **kwargs):
     """Return a minimal FlightBody for testing."""
-    defaults = dict(
-        name=name,
-        geometry=0.05,
-        mass_model=lambda t: 10.0,
-        inertia_model=lambda t: (1.0, 1.0, 0.05, 0.0, 0.0, 0.0),
-        center_of_mass_model=lambda t: 0.5,
-    )
+    defaults = {
+        "name": name,
+        "geometry": 0.05,
+        "mass_model": lambda t: 10.0,
+        "inertia_model": lambda t: (1.0, 1.0, 0.05, 0.0, 0.0, 0.0),
+        "center_of_mass_model": lambda t: 0.5,
+    }
     defaults.update(kwargs)
     return FlightBody(**defaults)
 
@@ -52,11 +52,11 @@ def _make_attachment():
     )
 
 
-def _always_trigger(**kwargs):
+def _always_trigger(**_kwargs):
     return True
 
 
-def _never_trigger(**kwargs):
+def _never_trigger(**_kwargs):
     return False
 
 
@@ -94,11 +94,11 @@ class FakeRocket:
     def add_motor(self, motor, position):
         """No-op helper to satisfy rocket-like interface in tests."""
 
-    def total_mass(self, t):
+    def total_mass(self, _t):
         """Return a deterministic mass for test doubles."""
         return 1.0
 
-    def center_of_mass(self, t):
+    def center_of_mass(self, _t):
         """Return a deterministic center-of-mass value for test doubles."""
         return 0.0
 
@@ -263,7 +263,7 @@ class TestSeparationModel:
     def test_separation_model_is_abstract(self):
         """SeparationModel cannot be instantiated directly."""
         with pytest.raises(TypeError):
-            SeparationModel()  # type: ignore[abstract]
+            SeparationModel()  # type: ignore[abstract] # pylint: disable=abstract-class-instantiated
 
     def test_instantaneous_returns_states_unchanged(self):
         """InstantaneousSeparation.apply returns (parent_state, child_state) unmodified."""
@@ -286,7 +286,7 @@ class TestParentUpdate:
     def test_parent_update_is_abstract(self):
         """ParentUpdate cannot be instantiated directly."""
         with pytest.raises(TypeError):
-            ParentUpdate()  # type: ignore[abstract]
+            ParentUpdate()  # type: ignore[abstract] # pylint: disable=abstract-class-instantiated
 
     def test_no_op_does_not_raise(self):
         """NoOpParentUpdate.apply runs without raising."""

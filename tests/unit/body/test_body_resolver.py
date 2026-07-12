@@ -27,10 +27,10 @@ class _FakeRocket:
     def add_motor(self, motor, position):
         """No-op helper to satisfy FlightCompatibleRocket."""
 
-    def total_mass(self, t):
+    def total_mass(self, _t):
         return 1.0
 
-    def center_of_mass(self, t):
+    def center_of_mass(self, _t):
         return 0.0
 
 
@@ -40,10 +40,10 @@ class _ProtocolOnlyRocket:
     def add_motor(self, motor, position):
         """No-op helper to satisfy FlightCompatibleRocket."""
 
-    def total_mass(self, t):
+    def total_mass(self, _t):
         return 1.0
 
-    def center_of_mass(self, t):
+    def center_of_mass(self, _t):
         return 0.0
 
 

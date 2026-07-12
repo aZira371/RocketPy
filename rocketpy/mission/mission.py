@@ -3,6 +3,9 @@
 import warnings
 from typing import Any
 
+from rocketpy.mission.deployable import Deployable
+from rocketpy.mission.stage import Stage
+
 
 class Mission:  # pylint: disable=too-many-instance-attributes
     """Container that stores all mission items for a multistage flight.
@@ -73,8 +76,6 @@ class Mission:  # pylint: disable=too-many-instance-attributes
         TypeError
             If *stage* is not a :class:`~rocketpy.mission.Stage` instance.
         """
-        from rocketpy.mission.stage import Stage  # local import to avoid circularity
-
         if not isinstance(stage, Stage):
             raise TypeError(f"Expected a Stage instance, got {type(stage).__name__!r}.")
         stage.validate()
@@ -98,8 +99,6 @@ class Mission:  # pylint: disable=too-many-instance-attributes
             If *deployable* is not a
             :class:`~rocketpy.mission.Deployable` instance.
         """
-        from rocketpy.mission.deployable import Deployable  # local import
-
         if not isinstance(deployable, Deployable):
             raise TypeError(
                 f"Expected a Deployable instance, got {type(deployable).__name__!r}."
