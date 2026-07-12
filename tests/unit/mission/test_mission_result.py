@@ -129,9 +129,7 @@ class TestMissionResultPlotAll:
             def trajectories_3d(self, legend=None):
                 calls["legend"] = legend
 
-        monkeypatch.setattr(
-            "rocketpy.plots.CompareFlights", _FakeCompareFlights
-        )
+        monkeypatch.setattr("rocketpy.plots.CompareFlights", _FakeCompareFlights)
 
         root_flight = _FakeFlight()
         branch = _make_branch_result("stage_1")

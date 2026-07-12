@@ -26,7 +26,6 @@ from rocketpy.mission import (
 )
 from rocketpy.simulation import Event
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -676,7 +675,9 @@ class TestMissionExecutor:
             initial_solution = kwargs.get("initial_solution")
             if hasattr(initial_solution, "initial_solution"):
                 initial_solution = initial_solution.initial_solution
-            self.initial_solution = list(initial_solution) if initial_solution else [0.0]
+            self.initial_solution = (
+                list(initial_solution) if initial_solution else [0.0]
+            )
             self.t_initial = self.initial_solution[0]
             self.apogee = 100.0
             self.impact_velocity = -5.0
@@ -788,7 +789,9 @@ class TestMissionExecutorRun:
             _make_stage(name="stage_1", body=_make_rocket_adapter("stage_rocket"))
         )
         mission.add_deployable(
-            _make_deployable(name="payload", body=_make_rocket_adapter("payload_rocket"))
+            _make_deployable(
+                name="payload", body=_make_rocket_adapter("payload_rocket")
+            )
         )
         executor = MissionExecutor(
             mission=mission,

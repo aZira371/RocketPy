@@ -3,7 +3,7 @@
 import pytest
 
 from rocketpy import Rocket
-from rocketpy.body import RocketAdapter
+from rocketpy.body import FlightBody, RocketAdapter
 from rocketpy.mission import (
     Attachment,
     Deployable,
@@ -12,8 +12,6 @@ from rocketpy.mission import (
     Stage,
     StageSeparationEvent,
 )
-from rocketpy.body import FlightBody
-
 
 # ---------------------------------------------------------------------------
 # Helpers

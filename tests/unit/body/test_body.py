@@ -4,7 +4,6 @@ import pytest
 
 from rocketpy.body import BodyLike, FlightBody, RocketAdapter
 
-
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
