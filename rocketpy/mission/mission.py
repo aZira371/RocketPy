@@ -1,9 +1,10 @@
 """Mission – top-level container for a multistage rocket mission."""
 
+import warnings
 from typing import Any
 
 
-class Mission:
+class Mission:  # pylint: disable=too-many-instance-attributes
     """Container that stores all mission items for a multistage flight.
 
     A :class:`Mission` groups together all the :class:`~rocketpy.mission.Stage`
@@ -17,11 +18,18 @@ class Mission:
     name : str, optional
         Human-readable name for the mission (e.g. ``"Falcon9_Demo"``).
         Defaults to ``"Mission"``.
+    root_vehicle : Rocket or FlightBody, optional
+        The assembled vehicle before any stage/deployable event occurs.
+        Defaults to ``None``.
 
     Attributes
     ----------
     name : str
         Mission name.
+    root_vehicle : Rocket, FlightBody, or None
+        The assembled vehicle flown before any stage/deployable event.
+        Not part of :meth:`attached_items` – it is the vehicle that
+        attached items detach *from*.
     stages : list[:class:`~rocketpy.mission.Stage`]
         Ordered list of rocket stages (first-to-fire first).
     deployables : list[:class:`~rocketpy.mission.Deployable`]
@@ -37,11 +45,13 @@ class Mission:
     0
     """
 
-    def __init__(self, name: str = "Mission"):
+    def __init__(self, name: str = "Mission", root_vehicle=None):
         self.name = name
+        self.root_vehicle = root_vehicle
         self.stages: list = []
         self.deployables: list = []
         self._flight_inputs: dict[str, dict[str, Any]] = {}
+        self._root_flight_inputs: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Mutating helpers
@@ -97,6 +107,39 @@ class Mission:
         deployable.validate()
         self.deployables.append(deployable)
         self._flight_inputs.setdefault(self._item_key(deployable), {})
+
+    def set_root_vehicle(self, vehicle):
+        """Set the assembled vehicle flown before any stage/deployable event.
+
+        Parameters
+        ----------
+        vehicle : Rocket or FlightBody
+            The root vehicle. Unlike stages/deployables, it is not wrapped
+            in an :class:`~rocketpy.mission.AttachedItem` and is not
+            returned by :meth:`attached_items`.
+        """
+        self.root_vehicle = vehicle
+
+    def set_root_flight_inputs(self, **flight_inputs):
+        """Set flight inputs used for the root vehicle's flight.
+
+        Parameters
+        ----------
+        **flight_inputs
+            Keyword arguments forwarded to ``rocketpy.simulation.Flight``
+            when the root vehicle is executed.
+        """
+        self._root_flight_inputs.update(flight_inputs)
+
+    def get_root_flight_inputs(self) -> dict[str, Any]:
+        """Return configured flight inputs for the root vehicle.
+
+        Returns
+        -------
+        dict[str, Any]
+            Copy of configured inputs. Empty dict when not configured.
+        """
+        return dict(self._root_flight_inputs)
 
     # ------------------------------------------------------------------
     # Query helpers
@@ -180,6 +223,81 @@ class Mission:
         """
         key = self._resolve_item_key(item)
         return dict(self._flight_inputs.get(key, {}))
+
+    def describe(self) -> str:
+        """Return a human-readable, multi-line summary of this mission.
+
+        Returns
+        -------
+        str
+            Summary including the mission name, root vehicle, stage states,
+            deployables, and configured per-item flight inputs.
+        """
+        lines = [f"Mission: {self.name!r}"]
+        if self.root_vehicle is None:
+            lines.append("root_vehicle: not set")
+        else:
+            root_name = getattr(self.root_vehicle, "name", None)
+            lines.append(
+                f"root_vehicle: {type(self.root_vehicle).__name__}"
+                + (f" (name={root_name!r})" if root_name else "")
+            )
+        lines.append(f"stages ({self.number_of_stages}):")
+        for stage in self.stages:
+            lines.append(f"  - {stage.name!r}: state={stage.state.name}")
+        lines.append(f"deployables ({len(self.deployables)}):")
+        for deployable in self.deployables:
+            lines.append(f"  - {deployable.name!r}")
+        for item in self.attached_items():
+            inputs = self.get_flight_inputs(item)
+            if inputs:
+                lines.append(f"flight_inputs[{item.name!r}]: {inputs}")
+        return "\n".join(lines)
+
+    def validate(self, require_root_vehicle: bool = False):
+        """Validate the whole mission's configuration.
+
+        Re-validates every attached item and checks mission-wide invariants
+        that individual item validation cannot catch, such as duplicate
+        item names and root vehicle presence.
+
+        Parameters
+        ----------
+        require_root_vehicle : bool, optional
+            If ``True``, raise when :attr:`root_vehicle` is unset instead of
+            only warning. Defaults to ``False``.
+
+        Raises
+        ------
+        ValueError
+            If any attached item fails validation, if two items share the
+            same name, or if *require_root_vehicle* is ``True`` and
+            :attr:`root_vehicle` is unset.
+        """
+        errors = []
+
+        names_seen = set()
+        for item in self.attached_items():
+            if item.name in names_seen:
+                errors.append(f"Duplicate attached item name: {item.name!r}.")
+            names_seen.add(item.name)
+
+            try:
+                item.validate()
+            except ValueError as exc:
+                errors.append(f"{item.name!r}: {exc}")
+
+        if errors:
+            raise ValueError(
+                f"Mission {self.name!r} failed validation:\n"
+                + "\n".join(f"  - {error}" for error in errors)
+            )
+
+        if self.root_vehicle is None:
+            message = f"Mission {self.name!r} has no root_vehicle set."
+            if require_root_vehicle:
+                raise ValueError(message)
+            warnings.warn(message)
 
     def _item_key(self, item) -> str:
         # Internal opaque identifier used only as dict key to avoid collisions

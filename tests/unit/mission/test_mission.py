@@ -12,6 +12,7 @@ from rocketpy.mission import (
     Deployable,
     DeploymentEvent,
     Event,
+    FlightConfig,
     IgnitionEvent,
     InstantaneousSeparation,
     Mission,
@@ -517,17 +518,142 @@ class TestMissionMissionMetadata:
             mission.set_flight_inputs("missing_stage", inclination=85)
 
 
+class TestMissionRootVehicle:
+    """Mission.root_vehicle is a distinguished, non-attached-item vehicle."""
+
+    def test_default_root_vehicle_is_none(self):
+        """root_vehicle defaults to None."""
+        assert Mission().root_vehicle is None
+
+    def test_root_vehicle_via_constructor(self):
+        """root_vehicle can be set via the constructor."""
+        vehicle = _make_rocket_adapter("root")
+        mission = Mission(root_vehicle=vehicle)
+        assert mission.root_vehicle is vehicle
+
+    def test_set_root_vehicle(self):
+        """set_root_vehicle updates root_vehicle."""
+        mission = Mission()
+        vehicle = _make_rocket_adapter("root")
+        mission.set_root_vehicle(vehicle)
+        assert mission.root_vehicle is vehicle
+
+    def test_root_vehicle_excluded_from_attached_items(self):
+        """root_vehicle is not part of attached_items()."""
+        mission = Mission(root_vehicle=_make_rocket_adapter("root"))
+        mission.add_stage(_make_stage(name="stage_1"))
+        assert len(mission.attached_items()) == 1
+
+    def test_root_flight_inputs_round_trip(self):
+        """set_root_flight_inputs/get_root_flight_inputs store and return inputs."""
+        mission = Mission()
+        mission.set_root_flight_inputs(inclination=85, heading=10)
+        inputs = mission.get_root_flight_inputs()
+        assert inputs == {"inclination": 85, "heading": 10}
+
+    def test_get_root_flight_inputs_empty_by_default(self):
+        """get_root_flight_inputs returns an empty dict when unconfigured."""
+        assert Mission().get_root_flight_inputs() == {}
+
+
+class TestMissionDescribe:
+    """Mission.describe() returns a human-readable summary."""
+
+    def test_describe_without_root_vehicle(self):
+        """describe() reports root_vehicle as not set."""
+        mission = Mission(name="Demo")
+        assert "root_vehicle: not set" in mission.describe()
+        assert "Demo" in mission.describe()
+
+    def test_describe_with_root_vehicle(self):
+        """describe() reports the root vehicle's type."""
+        mission = Mission(root_vehicle=_make_rocket_adapter("root"))
+        assert "RocketAdapter" in mission.describe()
+
+    def test_describe_lists_stages_and_deployables(self):
+        """describe() lists each stage's name/state and each deployable's name."""
+        mission = Mission()
+        mission.add_stage(_make_stage(name="stage_1"))
+        mission.add_deployable(_make_deployable(name="payload"))
+        description = mission.describe()
+        assert "stage_1" in description
+        assert "payload" in description
+        assert "ATTACHED" in description
+
+
+class TestMissionValidate:
+    """Mission.validate() aggregates per-item validation plus mission invariants."""
+
+    def test_validate_passes_for_well_formed_mission(self):
+        """validate() does not raise for a valid mission."""
+        mission = Mission(root_vehicle=_make_rocket_adapter("root"))
+        mission.add_stage(_make_stage(name="stage_1"))
+        mission.validate()  # must not raise
+
+    def test_validate_raises_on_duplicate_names(self):
+        """validate() raises ValueError when two items share a name."""
+        mission = Mission()
+        mission.add_stage(_make_stage(name="dup"))
+        mission.add_deployable(_make_deployable(name="dup"))
+        with pytest.raises(ValueError, match="Duplicate"):
+            mission.validate()
+
+    def test_validate_aggregates_item_errors(self):
+        """validate() collects every failing item's error into one ValueError."""
+        mission = Mission()
+        stage = _make_stage(name="stage_1")
+        deployable = _make_deployable(name="payload")
+        mission.add_stage(stage)
+        mission.add_deployable(deployable)
+        # Mutate after adding to bypass add_stage/add_deployable's own checks.
+        stage.body = None
+        deployable.body = None
+
+        with pytest.raises(ValueError) as exc_info:
+            mission.validate()
+        assert "stage_1" in str(exc_info.value)
+        assert "payload" in str(exc_info.value)
+
+    def test_validate_warns_when_root_vehicle_unset(self):
+        """validate() warns (does not raise) when root_vehicle is unset."""
+        mission = Mission()
+        mission.add_stage(_make_stage(name="stage_1"))
+        with pytest.warns(UserWarning, match="root_vehicle"):
+            mission.validate()
+
+    def test_validate_raises_when_root_vehicle_required(self):
+        """validate(require_root_vehicle=True) raises when root_vehicle is unset."""
+        mission = Mission()
+        mission.add_stage(_make_stage(name="stage_1"))
+        with pytest.raises(ValueError, match="root_vehicle"):
+            mission.validate(require_root_vehicle=True)
+
+
 class TestMissionExecutor:
     """MissionExecutor runs mission items without requiring manual Flight setup."""
 
     class FakeFlight:
-        """Simple stand-in for rocketpy.simulation.Flight."""
+        """Simple stand-in for rocketpy.simulation.Flight.
+
+        Mimics just enough of Flight's initial_solution-chaining contract
+        (see Flight.__init_flight_state) for MissionExecutor's sequential
+        chaining logic to be exercised: passing a previous FakeFlight as
+        initial_solution resolves to that flight's own final state.
+        """
 
         def __init__(self, rocket, environment, rail_length, **kwargs):
             self.rocket = rocket
             self.environment = environment
             self.rail_length = rail_length
             self.kwargs = kwargs
+
+            initial_solution = kwargs.get("initial_solution")
+            if hasattr(initial_solution, "initial_solution"):
+                initial_solution = initial_solution.initial_solution
+            self.initial_solution = list(initial_solution) if initial_solution else [0.0]
+            self.t_initial = self.initial_solution[0]
+            self.apogee = 100.0
+            self.impact_velocity = -5.0
 
     def test_execute_runs_stage_and_deployable(self):
         """execute runs all mission attached items in mission order."""
@@ -556,6 +682,7 @@ class TestMissionExecutor:
         assert results[0].flight.kwargs["heading"] == 15
         assert results[1].flight.kwargs["heading"] == 45
         assert results[1].flight.kwargs["initial_solution"] is results[0].flight
+        assert stage.state == StageState.SPENT
 
     def test_execute_raises_for_non_rocket_body(self):
         """execute raises TypeError when body is not RocketAdapter-backed."""
@@ -585,8 +712,9 @@ class TestMissionExecutor:
         results = executor.execute()
         assert results[0].flight.rocket.name == "raw_stage"
 
-    def test_execute_accepts_flight_body(self):
-        """execute accepts FlightBody bodies without converting them."""
+    def test_execute_raises_for_flight_body(self):
+        """execute raises a clear TypeError for a bare FlightBody, since it
+        cannot drive a real Flight (no total_mass()/add_motor())."""
         mission = Mission()
         body = _make_body("flight_body")
         mission.add_stage(_make_stage(name="stage_1", body=body))
@@ -596,5 +724,136 @@ class TestMissionExecutor:
             rail_length=5.0,
             flight_class=self.FakeFlight,
         )
-        results = executor.execute()
-        assert results[0].flight.rocket is body
+        with pytest.raises(TypeError, match="FlightBody"):
+            executor.execute()
+
+
+class TestMissionExecutorRun:
+    """MissionExecutor.run()/dry_run() build on top of execute()'s logic."""
+
+    FakeFlight = TestMissionExecutor.FakeFlight
+
+    def test_run_without_root_vehicle(self):
+        """run() returns a MissionResult with root_flight None when
+        mission.root_vehicle is unset."""
+        mission = Mission()
+        mission.add_stage(
+            _make_stage(name="stage_1", body=_make_rocket_adapter("stage_rocket"))
+        )
+        mission.add_deployable(
+            _make_deployable(name="payload", body=_make_rocket_adapter("payload_rocket"))
+        )
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            flight_class=self.FakeFlight,
+        )
+
+        result = executor.run()
+
+        assert result.root_flight is None
+        assert list(result.branch_flights) == ["stage_1", "payload"]
+        assert [branch.name for branch in result.branch_results] == [
+            "stage_1",
+            "payload",
+        ]
+
+    def test_run_with_root_vehicle_chains_from_root(self):
+        """run() builds a root flight first and chains the first item from it."""
+        mission = Mission(root_vehicle=_make_rocket_adapter("root_rocket"))
+        mission.add_stage(
+            _make_stage(name="stage_1", body=_make_rocket_adapter("stage_rocket"))
+        )
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            flight_class=self.FakeFlight,
+        )
+
+        result = executor.run()
+
+        assert result.root_flight is not None
+        assert result.branch_results[0].flight.kwargs["initial_solution"] is (
+            result.root_flight
+        )
+
+    def test_run_raises_for_flight_body_item(self):
+        """run() raises the BodyResolver error at the executor boundary for a
+        bare FlightBody attached item."""
+        mission = Mission()
+        mission.add_stage(_make_stage(name="stage_1", body=_make_body("flight_body")))
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            flight_class=self.FakeFlight,
+        )
+        with pytest.raises(TypeError, match="FlightBody"):
+            executor.run()
+
+    def test_run_raises_for_flight_body_root_vehicle(self):
+        """run() raises the same clear error for a FlightBody root_vehicle."""
+        mission = Mission(root_vehicle=_make_body("flight_body_root"))
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            flight_class=self.FakeFlight,
+        )
+        with pytest.raises(TypeError, match="FlightBody"):
+            executor.run()
+
+    def test_run_marks_stage_spent(self):
+        """run() transitions Stage.state to SPENT once its branch is built."""
+        mission = Mission()
+        stage = _make_stage(name="stage_1", body=_make_rocket_adapter("stage_rocket"))
+        mission.add_stage(stage)
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            flight_class=self.FakeFlight,
+        )
+
+        executor.run()
+
+        assert stage.state == StageState.SPENT
+
+    def test_dry_run_never_constructs_a_flight(self):
+        """dry_run() resolves bodies/configs without invoking flight_class."""
+
+        def _failing_flight_class(*args, **kwargs):
+            raise AssertionError("dry_run() must not construct a Flight.")
+
+        mission = Mission(root_vehicle=_make_rocket_adapter("root_rocket"))
+        mission.add_stage(
+            _make_stage(name="stage_1", body=_make_rocket_adapter("stage_rocket"))
+        )
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            default_flight_inputs={"inclination": 80},
+            flight_class=_failing_flight_class,
+        )
+
+        configs = executor.dry_run()
+
+        assert [config.rail_length for config in configs] == [5.0, 5.0]
+        assert all(isinstance(config, FlightConfig) for config in configs)
+        assert all(config.inclination == 80 for config in configs)
+
+    def test_dry_run_raises_for_flight_body(self):
+        """dry_run() still surfaces the FlightBody guard, cheaply."""
+        mission = Mission()
+        mission.add_stage(_make_stage(name="stage_1", body=_make_body("flight_body")))
+        executor = MissionExecutor(
+            mission=mission,
+            environment=object(),
+            rail_length=5.0,
+            flight_class=self.FakeFlight,
+        )
+        with pytest.raises(TypeError, match="FlightBody"):
+            executor.dry_run()

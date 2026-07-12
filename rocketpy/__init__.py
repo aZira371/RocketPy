@@ -1,4 +1,10 @@
-from .body import BodyLike, FlightBody, RocketAdapter
+from .body import (
+    BodyLike,
+    BodyResolver,
+    FlightBody,
+    FlightCompatibleRocket,
+    RocketAdapter,
+)
 from .control import _Controller
 from .environment import Environment, EnvironmentAnalysis
 from .mathutils import (
@@ -9,14 +15,17 @@ from .mathutils import (
 )
 from .mission import (
     Attachment,
+    BranchResult,
     Deployable,
     DeploymentEvent,
     Event,
+    FlightConfig,
     IgnitionEvent,
     InstantaneousSeparation,
     Mission,
     MissionExecutionResult,
     MissionExecutor,
+    MissionResult,
     NoOpParentUpdate,
     ParentUpdate,
     RecoveryEvent,
