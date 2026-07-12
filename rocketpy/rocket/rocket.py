@@ -6,8 +6,11 @@ from typing import Iterable
 
 import numpy as np
 
+from rocketpy.body.rocket_adapter import RocketAdapter
 from rocketpy.control.controller import _Controller
 from rocketpy.mathutils.function import Function
+from rocketpy.mission.deployable import Deployable
+from rocketpy.mission.stage import Stage
 from rocketpy.mathutils.vector_matrix import Matrix, Vector
 from rocketpy.motors.empty_motor import EmptyMotor
 from rocketpy.plots.rocket_plots import _RocketPlots
@@ -344,6 +347,10 @@ class Rocket:
         self.aerodynamic_surfaces = Components()
         self.surfaces_cp_to_cdm = {}
         self.rail_buttons = Components()
+
+        # Multistage mission items (AttachmentHost interface)
+        self._stages = []
+        self._deployables = []
 
         self.cp_position = Function(
             lambda mach: 0,
@@ -2177,6 +2184,134 @@ class Rocket:
             and webp (these are the formats supported by matplotlib).
         """
         self.plots.draw(vis_args, plane, filename=filename)
+
+    # ------------------------------------------------------------------
+    # AttachmentHost interface – multistage mission support
+    # ------------------------------------------------------------------
+
+    def add_stage(self, stage):
+        """Attach a :class:`~rocketpy.mission.Stage` to this rocket.
+
+        Parameters
+        ----------
+        stage : :class:`~rocketpy.mission.Stage`
+            Stage to attach.  Must pass its own ``validate()`` check.
+
+        Raises
+        ------
+        TypeError
+            If *stage* is not a :class:`~rocketpy.mission.Stage` instance.
+        ValueError
+            If *stage* fails validation.
+        """
+        if not isinstance(stage, Stage):
+            raise TypeError(f"Expected a Stage instance, got {type(stage).__name__!r}.")
+        stage.validate()
+        self._stages.append(stage)
+
+    def add_deployable(self, deployable):
+        """Attach a :class:`~rocketpy.mission.Deployable` to this rocket.
+
+        Parameters
+        ----------
+        deployable : :class:`~rocketpy.mission.Deployable`
+            Deployable to attach.  Must pass its own ``validate()`` check.
+
+        Raises
+        ------
+        TypeError
+            If *deployable* is not a
+            :class:`~rocketpy.mission.Deployable` instance.
+        ValueError
+            If *deployable* fails validation.
+        """
+        if not isinstance(deployable, Deployable):
+            raise TypeError(
+                f"Expected a Deployable instance, got {type(deployable).__name__!r}."
+            )
+        deployable.validate()
+        self._deployables.append(deployable)
+
+    def select_stage(self, stage):
+        """Return the :class:`~rocketpy.mission.Stage` identified by *stage*.
+
+        Parameters
+        ----------
+        stage : int or str
+            Either the zero-based index of the stage in :attr:`stages`, or
+            the ``name`` attribute of the desired stage.
+
+        Returns
+        -------
+        :class:`~rocketpy.mission.Stage`
+            The matching stage.
+
+        Raises
+        ------
+        IndexError
+            If *stage* is an integer that is out of range.
+        KeyError
+            If *stage* is a string that does not match any stage name.
+        TypeError
+            If *stage* is neither an int nor a str.
+        """
+        if isinstance(stage, int):
+            return self._stages[stage]
+        elif isinstance(stage, str):
+            for s in self._stages:
+                if s.name == stage:
+                    return s
+            raise KeyError(f"No stage named {stage!r} found.")
+        else:
+            raise TypeError(f"stage must be int or str, got {type(stage).__name__!r}.")
+
+    def attached_items(self):
+        """Return all attached mission items (stages then deployables).
+
+        Returns
+        -------
+        list[:class:`~rocketpy.mission.AttachedItem`]
+            Combined list of :attr:`stages` + :attr:`deployables`.
+        """
+        return list(self._stages) + list(self._deployables)
+
+    def as_body(self):
+        """Wrap this rocket in a :class:`~rocketpy.body.RocketAdapter`.
+
+        The adapter satisfies the :class:`~rocketpy.body.BodyLike` interface
+        so that the simulation engine can consume this rocket without
+        depending on the :class:`Rocket` class directly.
+
+        Returns
+        -------
+        :class:`~rocketpy.body.RocketAdapter`
+            Adapter wrapping ``self``.
+        """
+        return RocketAdapter(self)
+
+    @property
+    def stages(self):
+        """Stages attached to this rocket.
+
+        Returns
+        -------
+        list[:class:`~rocketpy.mission.Stage`]
+        """
+        return list(self._stages)
+
+    @property
+    def deployables(self):
+        """Deployables attached to this rocket.
+
+        Returns
+        -------
+        list[:class:`~rocketpy.mission.Deployable`]
+        """
+        return list(self._deployables)
+
+    # ------------------------------------------------------------------
+    # End AttachmentHost interface
+    # ------------------------------------------------------------------
 
     def info(self):
         """Prints out a summary of the data and graphs available about
